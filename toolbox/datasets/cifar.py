@@ -1,4 +1,4 @@
-from torchvision.datasets import CIFAR10 as cifar10
+from torchvision.datasets import CIFAR10 as cifar10, CIFAR100 as cifar100
 
 class CIFAR10(cifar10):
 
