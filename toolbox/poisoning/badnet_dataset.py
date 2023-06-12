@@ -10,7 +10,7 @@ from ._poisoned_dataset import PoisonedDataset
 
 class BadNetPoison(PoisonedDataset):
 
-    def __init__(self, dataset, poison_ratio=0.4, target_class=0, poison_type='dirty', trigger_img='badnet_patch', trigger_size=6):
+    def __init__(self, dataset, poison_ratio=0.4, target_class=0, poison_type='dirty', trigger_img='apple_patch', trigger_size=2):
         super().__init__(dataset, poison_ratio)
 
         self.poison_ratio = poison_ratio

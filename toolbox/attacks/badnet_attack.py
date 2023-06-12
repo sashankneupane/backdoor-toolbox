@@ -82,7 +82,7 @@ class BadNetAttack(Attack):
                         class_total[original_label] += 1
                     # if the sample is poisoned
                     else:
-                        
+                        total_test_poisoned += 1 
                         misclassification_count += (predicted[i] != original_label).item()
                         attack_success_count += (predicted[i] == poisoned_label).item()
 
