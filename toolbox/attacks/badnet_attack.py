@@ -17,7 +17,6 @@ class BadNetAttack(Attack):
         optimizer, 
         loss_function,
         attack_args: dict,
-        test_poison_ratio
         ) -> None: 
         
         super().__init__(device, model, trainset, testset, epochs, batch_size, optimizer, loss_function)
