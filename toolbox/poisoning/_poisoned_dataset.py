@@ -71,6 +71,20 @@ class PoisonedDataset(torch.utils.data.Dataset):
         return self.poison_transform(self.dataset, self.poison_ratio)
 
 
+    # function to get the targets of the poisoned dataset
+    @property
+    def targets(self):
+        # first get the original targets
+        targets = self.dataset.targets
+        # clone the targets
+        poisoned_targets = targets.clone()
+        # change the targets of poisoned samples
+        for idx in self.poisoned_indices:
+            poisoned_targets[idx] = self.poison_label(targets[idx])
+        # iterate through the dataset and get poisoned labels as a tensor
+        return poisoned_targets
+
+
     # function to get poisoned label based on the type of poisoning
     def poison_label(self, label):
 
