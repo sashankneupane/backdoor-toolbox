@@ -3,3 +3,15 @@ venv/
 
 # ignore python cache
 **/__pycache__/
+
+## ignore sample data for testing
+data/
+
+## ignore notebooks for testing
+notebooks/
+
+## ignore build files
+build/
+
+## ignore models for testing
+models/
