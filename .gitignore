@@ -18,3 +18,6 @@ models/
 
 ## ignore ipython notebook checkpoints
 **/.ipynb_checkpoints/
+
+## package files
+*.egg-info/
