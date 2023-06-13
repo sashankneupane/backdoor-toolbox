@@ -16,17 +16,16 @@ class BadNetAttack(Attack):
         batch_size,  
         optimizer, 
         loss_function,
-        attack_args: dict
+        attack_args: dict,
+        test_poison_ratio
         ) -> None: 
         
         super().__init__(device, model, trainset, testset, epochs, batch_size, optimizer, loss_function)
 
-        self.testset = testset
         self.attack_args = attack_args
 
-        self.poison = BadNetPoison(trainset, poison_ratio=0.1)
-        self.poisoned_trainset = self.poison.dataset
-        self.poisoned_test = self.poison.poison_transform(self.testset)
+        self.poisoned_trainset = BadNetPoison(trainset, **attack_args)
+        
 
         self.original_test_labels = self.testset.targets
          # Create a new DataLoader for the poisoned test dataset

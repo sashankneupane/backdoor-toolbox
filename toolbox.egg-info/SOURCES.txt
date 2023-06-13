@@ -1,0 +1,17 @@
+README.md
+setup.py
+toolbox/__init__.py
+toolbox.egg-info/PKG-INFO
+toolbox.egg-info/SOURCES.txt
+toolbox.egg-info/dependency_links.txt
+toolbox.egg-info/top_level.txt
+toolbox/attacks/__init__.py
+toolbox/attacks/attack.py
+toolbox/attacks/badnet_attack.py
+toolbox/datasets/__init__.py
+toolbox/datasets/cifar.py
+toolbox/datasets/mnist.py
+toolbox/defenses/__init__.py
+toolbox/poisoning/__init__.py
+toolbox/poisoning/_poisoned_dataset.py
+toolbox/poisoning/badnet_dataset.py
