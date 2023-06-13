@@ -20,4 +20,4 @@ models/
 **/.ipynb_checkpoints/
 
 ## package files
-*.egg-info/
+**.egg-info/
