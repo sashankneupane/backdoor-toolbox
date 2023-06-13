@@ -70,6 +70,11 @@ class PoisonedDataset(torch.utils.data.Dataset):
     def poisoned_dataset(self):
         return self.poison_transform(self.dataset, self.poison_ratio)
 
+    
+    # function to get the original targets of the dataset
+    @property
+    def original_targets(self):
+        return self.dataset.targets
 
     # function to get the targets of the poisoned dataset
     @property
