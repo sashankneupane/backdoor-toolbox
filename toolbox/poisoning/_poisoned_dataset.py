@@ -52,11 +52,13 @@ class PoisonedDataset(torch.utils.data.Dataset):
 
         # (TODO) check if the index is tensor !!! Took two hours for me to figure it out T_T
 
-        # return poisoned sample
         sample, label = self.dataset[index]
+        poisoned_label = -1
+        # check if the sample is poisoned
         if index in self.poisoned_indices:
-            sample, label = self.poison_sample(sample, label)
-        return sample, label
+            sample, poisoned_label = self.poison_sample(sample, label)
+        # helps to keep track of the original labels
+        return sample, label, poisoned_label
 
 
     # similarly cannot use this function as well
