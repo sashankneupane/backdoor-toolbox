@@ -15,3 +15,6 @@ build/
 
 ## ignore models for testing
 models/
+
+## ignore ipython notebook checkpoints
+**/.ipynb_checkpoints/

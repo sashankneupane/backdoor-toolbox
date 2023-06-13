@@ -37,4 +37,4 @@ class Attack(ABC):
 
     def save_model(self, path):
         torch.save(self.model.state_dict(), path)
-        print(f"Model saved to {path}")
+        print(f"\nModel saved to {path}")

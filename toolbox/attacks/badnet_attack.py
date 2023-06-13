@@ -23,13 +23,17 @@ class BadNetAttack(Attack):
         super().__init__(device, model, trainset, testset, epochs, batch_size, optimizer, loss_function)
 
         self.attack_args = attack_args
+        self.poisoned_trainset = BadNetPoison(trainset, **self.attack_args)
 
-        self.poisoned_trainset = BadNetPoison(trainset, **attack_args)
-        
+        # get test poison_ratio
+        self.test_poison_ratio = attack_args.get("test_poison_ratio", self.poisoned_trainset.poison_ratio)
+        self.poisoned_testset = self.poisoned_trainset.poison_transform(self.testset, self.test_poison_ratio)
 
         self.original_test_labels = self.testset.targets
-         # Create a new DataLoader for the poisoned test dataset
-        self.poisoned_testloader = DataLoader(self.poisoned_test, batch_size=self.batch_size, shuffle=False)
+
+        # Create a new DataLoader for the poisoned test dataset
+        self.poisoned_testloader = DataLoader(self.poisoned_testset, batch_size=self.batch_size, shuffle=False)
+
 
     def attack(self):
 
@@ -39,12 +43,19 @@ class BadNetAttack(Attack):
             self.model.train()
             running_loss = 0.0
 
-            for idx, (inputs, labels) in enumerate(self.trainloader):
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                self.optimizer.zero_grad()
+            # data is a tuple of (inputs, labels, poisoned_labels) where poisoned_label = -1 if the sample is not poisoned
+            for _, (inputs, labels, poisoned_labels) in enumerate(self.trainloader):
+                
+                # move tensors to the configured device
+                inputs = inputs.to(self.device)
 
+                # change the poisoned_labels to the original labels when the poisoned_labels are -1
+                poisoned_labels = torch.where(poisoned_labels == -1, labels, poisoned_labels)
+                poisoned_labels = poisoned_labels.to(self.device)
+
+                self.optimizer.zero_grad()
                 outputs = self.model(inputs)
-                loss = self.loss_function(outputs, labels)
+                loss = self.loss_function(outputs, poisoned_labels)
                 loss.backward()
                 self.optimizer.step()
 
@@ -58,21 +69,30 @@ class BadNetAttack(Attack):
         
         self.model.eval()
 
-        class_correct = [0] * self.poison.num_classes
-        class_total = [0] * self.poison.num_classes
+        num_classes = self.poisoned_testset.num_classes
+        class_correct = [0] * num_classes
+        class_total = [0] * num_classes
 
         total_test_poisoned = 0
         misclassification_count = 0
         attack_success_count = 0
 
+        # evaluate the test accuracy and the attack success rate
         with torch.no_grad():
+            # inputs, labels, poisoned_labels where poisoned_label = -1 if the sample is not poisoned
+
             for data in self.poisoned_testloader:
-                inputs, original_labels, poisoned_labels = data[0].to(self.device), data[1].to(self.device), data[2].to(self.device)
+
+                inputs = data[0].to(self.device)
+                labels = data[1].to(self.device)
+                poisoned_labels = data[2].to(self.device)
+
                 outputs = self.model(inputs)
                 _, predicted = torch.max(outputs, 1)
 
-                for i in range(len(original_labels)):
-                    original_label = original_labels[i]
+                for i in range(len(labels)):
+
+                    original_label = labels[i]
                     poisoned_label = poisoned_labels[i]
 
                     # if the sample is not poisoned
