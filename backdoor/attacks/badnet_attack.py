@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from .attack import Attack
-from ..poisoning import BadNetPoison
+from ..poisons import BadNetPoison
 
 class BadNetAttack(Attack):
 
