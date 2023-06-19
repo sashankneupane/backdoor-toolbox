@@ -117,17 +117,4 @@ class PoisonedDataset(torch.utils.data.Dataset):
         return poisoned_sample, self.poison_label(label)
     
 
-    # returns a poisoned dataset instance with the same parameters as the current instance
-    # useful to poison test dataset with the same parameters as the train dataset
-    def poison_transform(self, dataset, poison_ratio):
-
-        return type(self)(
-            dataset,
-            poison_ratio=poison_ratio, 
-            target_class=self.target_class, 
-            poison_type=self.poison_type, 
-            trigger_img=self.trigger_img, 
-            trigger_size=self.trigger_size, 
-            mask=self.mask, 
-            poison=self.poison
-        )   
+    
