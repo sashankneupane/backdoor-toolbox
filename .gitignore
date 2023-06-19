@@ -21,3 +21,6 @@ models/
 
 ## package files
 *.egg-info/
+
+## tensorboard logs
+runs/

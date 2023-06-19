@@ -8,7 +8,7 @@ import torch
 class PoisonedDataset(torch.utils.data.Dataset):
 
 
-    def __init__(self, dataset, poison_type, poison_ratio, target_class, mask=None, poison=None):
+    def __init__(self, dataset, poison_type, poison_ratio, target_class, mask, poison):
 
         # initialize variables
         self.dataset = dataset

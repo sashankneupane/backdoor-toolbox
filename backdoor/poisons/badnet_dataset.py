@@ -1,7 +1,5 @@
 import os
-import random
 
-import numpy as np
 from PIL import Image
 import torch
 import torchvision.transforms as transforms
@@ -18,14 +16,14 @@ class BadNetPoison(PoisonedDataset):
         self.trigger_size = trigger_size
 
         # call parent constructor which will call get_poison() function
-        super().__init__(dataset, poison_type, poison_ratio, target_class)
+        super().__init__(dataset, poison_type, poison_ratio, target_class, mask, poison)
 
 
     # function to get the poison and its mask
     def get_poison(self):
 
         # load trigger image
-        trigger_img_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'triggers' , self.trigger_img + '.png')
+        trigger_img_path = os.path.join(os.path.dirname(__file__), 'triggers' , self.trigger_img + '.png')
         poison = Image.open(trigger_img_path).resize((self.trigger_size, self.trigger_size))
         poison = transforms.ToTensor()(poison)
 
