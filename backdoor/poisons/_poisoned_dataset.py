@@ -1,8 +1,6 @@
-import random
-import numpy as np
-
 from abc import abstractmethod
 
+import numpy as np
 import torch
 
 class PoisonedDataset(torch.utils.data.Dataset):
@@ -26,12 +24,12 @@ class PoisonedDataset(torch.utils.data.Dataset):
         # get indices of poisoned samples
         if self.poison_type == 'dirty':        
             self.num_poisoned_samples = int(self.poison_ratio * len(dataset))
-            self.poisoned_indices = set(random.sample(range(len(dataset)), self.num_poisoned_samples))
+            self.poisoned_indices = set(np.random.choice(range(len(dataset)), self.num_poisoned_samples))
         
         elif self.poison_type == 'clean':    
-            self.target_class = np.where(self.original_labels == self.target_class)[0] # indices of target_class only
-            self.num_poisoned_samples = int(self.poison_ratio * len(self.target_class))
-            self.poisoned_indices = set(random.sample(self.poisoned_indices, self.num_of_poisoned_samples))
+            target_indices = np.where(self.original_labels == self.target_class)[0] # indices of target_class only
+            self.num_poisoned_samples = int(self.poison_ratio * len(target_indices))
+            self.poisoned_indices = set(np.random.choice(target_indices, self.num_poisoned_samples))
 
         # check if mask and poison are provided
         if mask is None or poison is None:
