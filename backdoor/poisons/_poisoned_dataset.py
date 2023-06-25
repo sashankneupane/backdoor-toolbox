@@ -24,7 +24,8 @@ class PoisonedDataset(torch.utils.data.Dataset):
         # get indices of poisoned samples
         if self.poison_type == 'dirty':        
             self.num_poisoned_samples = int(self.poison_ratio * len(dataset))
-            self.poisoned_indices = set(np.random.choice(range(len(dataset)), self.num_poisoned_samples))
+            # replace=False ensures no duplicates
+            self.poisoned_indices = set(np.random.choice(range(len(dataset)), self.num_poisoned_samples, replace=False)) 
         
         elif self.poison_type == 'clean':    
             target_indices = np.where(self.original_labels == self.target_class)[0] # indices of target_class only
@@ -111,7 +112,6 @@ class PoisonedDataset(torch.utils.data.Dataset):
         poisoned_sample = sample * self.mask
 
         # add poison
-        # poisoned_sample = torch.clamp(poisoned_sample + self.poison, 0, 1)
         poisoned_sample.add_(self.poison)
 
         return poisoned_sample, self.poison_label(label)
