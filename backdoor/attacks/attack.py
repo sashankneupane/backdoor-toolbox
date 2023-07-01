@@ -1,6 +1,8 @@
+import random
 from abc import ABC, abstractmethod
 
 import torch
+import numpy as np
 
 class Attack(ABC):
 
@@ -13,9 +15,15 @@ class Attack(ABC):
         epochs,
         batch_size,
         optimizer,
-        loss_function
+        loss_function,
+        seed=0
     ) -> None:
         
+        # set seed
+        np.random.seed(seed)
+        random.seed(seed)
+        torch.manual_seed(seed)
+
         # training paramters
         self.device = device
         self.model = model

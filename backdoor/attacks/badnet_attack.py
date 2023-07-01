@@ -17,9 +17,10 @@ class BadNetAttack(Attack):
         optimizer, 
         loss_function,
         attack_args: dict,
+        seed=0
         ) -> None: 
         
-        super().__init__(device, model, trainset, testset, epochs, batch_size, optimizer, loss_function)
+        super().__init__(device, model, trainset, testset, epochs, batch_size, optimizer, loss_function, seed)
 
         self.attack_args = attack_args
         self.poisoned_trainset = BadNetPoison(trainset, **self.attack_args)

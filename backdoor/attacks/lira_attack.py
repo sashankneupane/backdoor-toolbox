@@ -27,10 +27,11 @@ class LiraAttack(Attack):
             batch_size,
             optimizer,
             trigger_optimizer, 
-            loss_function # loss function to use for the attack
+            loss_function, # loss function to use for the attack
+            seed=0
         ) -> None:
 
-        super().__init__(device, model, trainset, testset, epochs, batch_size, optimizer, loss_function)
+        super().__init__(device, model, trainset, testset, epochs, batch_size, optimizer, loss_function, seed)
 
         # variable to keep track of the attacking status
         self.attacked = False
