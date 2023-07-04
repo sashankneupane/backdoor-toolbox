@@ -26,7 +26,7 @@ class LiraAttack(Attack):
             tune_test_alpha, # hyperparamter to balance clean loss and backdoor loss in finetunign process
             batch_size,
             optimizer,
-            trigger_optimizer, 
+            trigger_optimizer,
             loss_function, # loss function to use for the attack
             seed=0
         ) -> None:
