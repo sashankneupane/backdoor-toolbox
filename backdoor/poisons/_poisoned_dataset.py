@@ -117,4 +117,14 @@ class PoisonedDataset(torch.utils.data.Dataset):
         return poisoned_sample, self.poison_label(label)
     
 
+# Dataset that only returns the labels
+class Labels(torch.utils.data.Dataset):
+    def __init__(self, dataset):
+        self.dataset = dataset
     
+    def __getitem__(self, index):
+        return self.dataset[index][1]
+    
+    def __len__(self):
+        return len(self.dataset)
+

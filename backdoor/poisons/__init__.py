@@ -1,11 +1,8 @@
-from .imagefolder import ImageFolder
-
-from .badnet_dataset import BadNetPoison
-from .lira_dataset import LiraPoison
-from .narcissus_dataset import NarcissusPoison 
+from .badnets_poison import BadNetPoison
+from .lira_poison import LiraPoison
+from .narcissus_poison import NarcissusPoison 
 
 __all__ = [
-    "ImageFolder",
     "BadNetPoison",
     "LiraPoison",
     "NarcissusPoison"

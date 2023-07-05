@@ -8,6 +8,7 @@ import torch
 from .attack import Attack
 from ..poisons import LiraPoison
 
+
 class LiraAttack(Attack):
 
     def __init__(
@@ -19,6 +20,7 @@ class LiraAttack(Attack):
             testset,
             target_class, # target label for the attack
             epochs,
+            update_trigger_epochs,
             finetune_epochs,
             eps, # data poisoning constraint for stealthiness
             alpha, # hyperparameter to balance clean loss and backdoor loss in training process
@@ -33,12 +35,11 @@ class LiraAttack(Attack):
 
         super().__init__(device, model, trainset, testset, epochs, batch_size, optimizer, loss_function, seed)
 
-        # variable to keep track of the attacking status
-        self.attacked = False
-
         # trigger model and its copy (to keep track of the gradients)
         self.trigger_model = trigger_model
         self.running_trigger_model = deepcopy(trigger_model)
+
+        self.update_trigger_epochs = update_trigger_epochs
 
         # optimizer of the trigger model
         self.trigger_optimizer = trigger_optimizer
@@ -49,37 +50,41 @@ class LiraAttack(Attack):
         self.tune_test_eps = tune_test_eps
         self.tune_test_alpha = tune_test_alpha
 
-        # prepare the poisoned_trainset
-        self.poisoned_trainset = LiraPoison(trainset, target_class, 'dirty', eps)
-
         # only store the test set for now, we will poison it as needed
         self.testset = testset
 
         # epochs for finetuning
         self.finetune_epochs = finetune_epochs
 
+        # flag to keep track of whether the attack has been run
+        self.attacked = False
 
-    def apply_trigger(self, samples, trigger):
-        return samples + trigger(samples) * self.eps
+
+    # function that applies the trigger to the samples
+    def apply_trigger(self, samples, trigger, eps):
+        poisoned_samples = samples + eps * trigger(samples)
+        return torch.clamp(poisoned_samples, -1, 1)
     
+
     # gets poisoned trainset
     def get_poisoned_trainset(self):
         if self.attacked:
-            return self.poisoned_trainset.poison_transform(self.trainset, self.eps, self.trigger_model)
+            return LiraPoison(self.trainset, self.target_class, self.trigger_model, self.eps)
         else:
-            print('Please run the attack first. Poisoned dataset instance without trigger model is returned.')
-            return self.poisoned_trainset
-        
+            return RuntimeError('Please run the attack first. Poisoned dataset instance without trigger model is returned.')
+
+
     # gets poisoned testset
-    def get_poisoned_testset(self, trigger_model=None, attacked=False):
-        if attacked or self.attacked: # attacked variable helps get the poisoned testset while evaluating the attack
-            return self.poisoned_trainset.poison_transform(self.testset, self.tune_test_eps, self.trigger_model)
+    def get_poisoned_testset(self):
+        if self.attacked:
+            return LiraPoison(self.testset, self.target_class, self.trigger_model, self.eps)
         else:
             return RuntimeError('Please run the attack first. No trigger model found to poison the testset.')
     
 
+    # Perform LIRA attack on the trainset
     def attack(self):
-        
+
         # Stage I LIRA attack with alternating optimization
         print('\nStage I LIRA attack with alternating optimization')
         
@@ -87,7 +92,7 @@ class LiraAttack(Attack):
         self.triggerlosses = []
         self.classifierlosses = []
 
-        # iterating through the epochs
+        # Iterate through the epochs
         for epoch in range(self.epochs):
             
             # model is updating every batch
@@ -97,18 +102,21 @@ class LiraAttack(Attack):
             # running trigger model is updating every batch
             self.running_trigger_model.train()
 
-            self.trainloader = torch.utils.data.DataLoader(
-                self.poisoned_trainset,
+            poisoned_trainset = LiraPoison(self.trainset, self.target_class, self.trigger_model, self.eps)
+
+            trainloader = torch.utils.data.DataLoader(
+                poisoned_trainset,
                 self.batch_size,
-                shuffle=True
+                shuffle=True,
+                num_workers=10,
             )
 
             # loss list for trigger model update later
             triggerlosses = []
             classifierlosses = []
 
-            # iterating through the batches, clean samples, labels, and poisoned labels
-            for _, (samples, labels, poisoned_labels) in enumerate(self.trainloader):
+            # Iterate through the the trainloader
+            for samples, labels, poisoned_labels in trainloader:
 
                 # moving the data to the device
                 samples = samples.to(self.device)
@@ -123,13 +131,13 @@ class LiraAttack(Attack):
                 # UPDATE of transformation function
                 # we will use the running trigger function here to keep track of update trajectories
                 # but we will use triggger function that will only be updated every epoch for classifier loss
-                poisoned_samples = self.apply_trigger(samples, self.running_trigger_model)
+                poisoned_samples = self.apply_trigger(samples, self.running_trigger_model, self.eps)
 
-                # calculate the loss for updating running trigger function
+                # Calculate the loss for updating running trigger function
                 poisoned_outputs = self.model(poisoned_samples)
 
-                # replace -1 in poisoned_labels with labels
-                poisoned_labels = torch.where(poisoned_labels == -1, labels, poisoned_labels)
+                # Should work without it as poison_ratio is 1
+                # poisoned_labels = torch.where(poisoned_labels == -1, labels, poisoned_labels)
                 
                 trigger_loss = self.loss_function(poisoned_outputs, poisoned_labels)
                 # get scalar value of the loss and add it to the list
@@ -143,25 +151,23 @@ class LiraAttack(Attack):
                 # -------------------------------------------------------------------------------------------
                 # UPDATE of classifier function
                 # we will use the trigger function here to calculate the loss
-                poisoned_samples = self.apply_trigger(samples, self.trigger_model)
+                poisoned_samples = self.apply_trigger(samples, self.trigger_model, self.eps)
 
-                # get the predictions for both term in the optimization equation
+                # Get the predictions for both term in the optimization equation
                 outputs = self.model(samples)
                 poisoned_outputs = self.model(poisoned_samples)
 
-                # calculate the losses
+                # Calculate the losses
                 clean_losses = self.loss_function(outputs, labels)
-                poisoned_losses = self.loss_function(poisoned_outputs, poisoned_labels)    
-                # calculate the overall loss using alpha hyperparameter that controls the mixing of clean loss and poisoned loss
+                poisoned_losses = self.loss_function(poisoned_outputs, poisoned_labels)
+
+                # Calculate the overall loss using alpha hyperparameter that controls the mixing of clean loss and poisoned loss
                 classifier_loss = clean_losses * self.alpha + poisoned_losses * (1 - self.alpha)
                 classifier_loss.backward()
                 self.optimizer.step()
 
                 classifierlosses.append(classifier_loss.item())
 
-                # print the progress
-                # if batch % 100 == 0:
-                #     print(f'Epoch: {epoch+1}/{self.epochs} | Batch: {batch+1}/{len(self.trainloader)} | Classifier Loss: {classifier_loss.item()} | Trigger Loss: {trigger_loss.item()}')
                 
             # get average loss for the trigger model
             avg_classifier_loss = sum(classifierlosses) / len(classifierlosses)
@@ -173,22 +179,30 @@ class LiraAttack(Attack):
             self.trainlosses.append(avg_classifier_loss)
 
 
-            # update the trigger_model with the running_trigger_model
-            self.trigger_model.load_state_dict(self.running_trigger_model.state_dict())
+            if epoch % self.update_trigger_epochs == 0:
+                # update the trigger_model with the running_trigger_model
+                self.trigger_model.load_state_dict(self.running_trigger_model.state_dict())
 
             self.evaluate_attack(epoch, avg_classifier_loss, avg_trigger_loss)
 
-        
         # Stage II LIRA attack with backdoor finetuning
         print('\nStage II LIRA attack with backdoor finetuning')
         for epoch in range(self.epochs, self.epochs+self.finetune_epochs):
             
+            poisoned_trainset = LiraPoison(self.trainset, self.target_class, self.trigger_model, self.eps)
+            trainloader = torch.utils.data.DataLoader(
+                poisoned_trainset,
+                self.batch_size,
+                shuffle=True,
+                num_workers=10,
+            )
+
             self.model.train()
             self.trigger_model.eval()
 
-            losses = []
+            finetunelosses = []
 
-            for batch, (samples, labels, poisoned_labels) in enumerate(self.trainloader):
+            for samples, labels, poisoned_labels in trainloader:
 
                 samples = samples.to(self.device)
                 labels = labels.to(self.device)
@@ -197,89 +211,76 @@ class LiraAttack(Attack):
                 # zero the gradients
                 self.model.zero_grad()
 
-                clean_loss = self.loss_function(self.model(samples), labels)
-                poisoned_samples = self.trigger_model(samples) * self.eps + samples
-
-
-                ### BUG TODO ### There should not be -1 anywhere
-                # replace -1 in poisoned_labels with labels
-                poisoned_labels = torch.where(poisoned_labels == -1, labels, poisoned_labels)
+                poisoned_samples = samples + self.trigger_model(samples) * self.eps
                 
+                clean_loss = self.loss_function(self.model(samples), labels)
                 poisoned_loss = self.loss_function(self.model(poisoned_samples), poisoned_labels)
-
                 total_loss = clean_loss * self.alpha + poisoned_loss * (1 - self.alpha)
+
                 total_loss.backward()
                 self.optimizer.step()
-                losses.append(total_loss.item())
+                
+                finetunelosses.append(total_loss.item())
             
-            self.classifierlosses += losses
-            self.trainlosses.append(sum(losses) / len(losses))
+            self.classifierlosses += finetunelosses
+            avg_finetuneloss = sum(finetunelosses) / len(finetunelosses)
+            self.trainlosses.append(avg_finetuneloss)
             
-            self.evaluate_attack(epoch, classifier_loss=total_loss)
+            self.evaluate_attack(epoch, classifier_loss=avg_finetuneloss)
 
 
         # set the attacked flag to true
         self.attacked = True
 
-        # TODO evaluate after each finetuning epoch as well
+
 
     def evaluate_attack(self, epoch, classifier_loss=None, trigger_loss=None):
-
-        # figure out where to inject poison later
-        poisoned_testset = self.get_poisoned_testset(attacked=True)
+        
         self.model.eval()
 
-        num_classes = poisoned_testset.num_classes
-        class_correct = [0] * num_classes
-        class_total = [0] * num_classes
-
-        total_test_poisoned = 0
-        attack_success_count = 0
-
-        # evaluate the test accuracy and the attack success rate
+        # Get Clean Test Accuracy
+        correct = 0
+        total = 0
+        asr_correct = 0
+        asr_total = 0
         with torch.no_grad():
-
-            self.testloader = torch.utils.data.DataLoader(
-                poisoned_testset,
+            
+            testloader = torch.utils.data.DataLoader(
+                self.testset,
                 self.batch_size,
-                shuffle=False
+                shuffle=False,
+                num_workers=10,
             )
 
-            for samples, labels, poisoned_labels in self.testloader:
-
+            for samples, labels in testloader:
+    
                 samples = samples.to(self.device)
+                poisoned_samples = self.apply_trigger(samples, self.trigger_model, self.tune_test_eps)
                 labels = labels.to(self.device)
-                poisoned_labels = poisoned_labels.to(self.device)
 
-                poisoned_samples = self.apply_trigger(samples, self.trigger_model)
-
-                # to calculate accuracy on clean samples
                 outputs = self.model(samples)
-                _, predicted = torch.max(outputs, 1)
-
                 poisoned_outputs = self.model(poisoned_samples)
+
+                _, predicted = torch.max(outputs, 1)
                 _, poisoned_predicted = torch.max(poisoned_outputs, 1)
 
-                for i in range(len(labels)):
+                total += labels.shape[0]
+                correct += (predicted == labels).sum().item()
 
-                    original_label = labels[i]
-                    poisoned_label = poisoned_labels[i]
+                for idx, label in enumerate(labels):
+                    if label != self.target_class:
+                        asr_total += 1
+                        if poisoned_predicted[idx] == self.target_class:
+                            asr_correct += 1
+            
+        clean_test_accuracy = correct / total
+        asr = asr_correct / max(1, asr_total)
 
-                    # for accuracy in clean samples
-                    class_correct[original_label] += (predicted[i] == original_label).item()
-                    class_total[original_label] += 1
-
-                    # for attack success rate
-                    total_test_poisoned += 1
-                    attack_success_count += (poisoned_predicted[i] == poisoned_label).item()
-
-
-        # print the results and accruacy in different lines
         print()
-        print(f"Epoch {epoch+1}/{self.epochs}", end='')
+        print(f"Epoch {epoch+1}/{self.epochs+self.finetune_epochs}", end='')
         if classifier_loss:
             print(f"\t|\tClassifier Loss: {classifier_loss}", end='')
         if trigger_loss:
             print(f"\t|\tTrigger Loss: {trigger_loss}", end='')
-        print(f"\nTest Accuracy: {sum(class_correct)/sum(class_total)}\nAttack success rate: {attack_success_count/total_test_poisoned}")
+        print(f"\nTest Accuracy: {clean_test_accuracy}\nAttack success rate: {asr}")
         print()
