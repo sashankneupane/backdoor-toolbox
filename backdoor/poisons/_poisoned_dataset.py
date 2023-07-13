@@ -1,12 +1,21 @@
 from abc import abstractmethod
+import logging
 
+import random
 import numpy as np
 import torch
+from torchvision import transforms
 
 class PoisonedDataset(torch.utils.data.Dataset):
 
 
-    def __init__(self, dataset, poison_type, poison_ratio, target_class, mask, poison):
+    def __init__(self, dataset, poison_type, poison_ratio, target_class, mask, poison, log_file=None, seed=None):
+        
+        # set seed if provided
+        if seed:
+            random.seed(seed)
+            torch.manual_seed(seed)
+            np.random.seed(seed)
 
         # initialize variables
         self.dataset = dataset
@@ -14,7 +23,7 @@ class PoisonedDataset(torch.utils.data.Dataset):
         self.poison_ratio = poison_ratio
         self.target_class = target_class
 
-        self.sample_shape = dataset[0][0].shape
+        self.sample_shape = transforms.ToTensor()(dataset[0][0]).shape
         
         # track original labels for future use
         self.original_labels = dataset.targets
@@ -39,6 +48,7 @@ class PoisonedDataset(torch.utils.data.Dataset):
             self.mask = mask
             self.poison = poison
 
+        self.logger = self.setup_logger(log_file)
 
     # function to get the poison for different kind of poisoning techniques
     @abstractmethod
@@ -91,7 +101,7 @@ class PoisonedDataset(torch.utils.data.Dataset):
         return poisoned_targets
 
 
-    # function to get poisoned label based on the type of poisoning
+    # Get poisoned label based on the type of poisoning
     def poison_label(self, label):
 
         # -1 corresponds to all classes
@@ -103,7 +113,7 @@ class PoisonedDataset(torch.utils.data.Dataset):
         return poisoned_label
 
 
-    # function to poison a single sample
+    # Poison a single sample
     def poison_sample(self, sample, label):
 
         poisoned_sample = sample.clone()
@@ -117,6 +127,37 @@ class PoisonedDataset(torch.utils.data.Dataset):
         return poisoned_sample, self.poison_label(label)
     
 
+    def setup_logger(self, log_file):
+        # Setup logger
+        logger = logging.getLogger(__name__)
+
+        # Setup console handler with a DEBUG log level
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.DEBUG)
+        console_handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
+        logger.addHandler(console_handler)
+
+        # Setup file handler with a INFO log level
+        if log_file is not None:
+            
+            # Check if directory exists
+            from os.path import dirname, exists, realpath
+            # if not exists(dirname(log_file)):
+            #     print(dirname(log_file))
+            #     # print(realpath(log_file))
+            #     raise ValueError('Directory does not exist: {}'.format(dirname(log_file)))
+
+            file_handler = logging.FileHandler(log_file, 'w')
+            file_handler.setLevel(logging.INFO)
+            file_handler.setFormatter(logging.Formatter('%(message)s'))
+            logger.addHandler(file_handler)
+
+        # Set logger level to DEBUG
+        logger.setLevel(logging.DEBUG)
+
+        return logger
+    
+
 # Dataset that only returns the labels
 class Labels(torch.utils.data.Dataset):
     def __init__(self, dataset):
@@ -127,4 +168,3 @@ class Labels(torch.utils.data.Dataset):
     
     def __len__(self):
         return len(self.dataset)
-

@@ -9,13 +9,11 @@ class Attack(ABC):
     def __init__(
         self,
         device,
-        model,
+        classifier,
         trainset,
         testset,
-        epochs,
         batch_size,
-        optimizer,
-        loss_function,
+        target_class,
         seed=0
     ) -> None:
         
@@ -26,13 +24,11 @@ class Attack(ABC):
 
         # training paramters
         self.device = device
-        self.model = model
+        self.classifier = classifier
         self.trainset = trainset
         self.testset = testset
-        self.epochs = epochs
         self.batch_size = batch_size
-        self.optimizer = optimizer
-        self.loss_function = loss_function
+        self.target_class = target_class
 
 
     @abstractmethod
@@ -44,5 +40,5 @@ class Attack(ABC):
         raise NotImplementedError("Attack is an abstract class. Please implement the evaluate_attack method.")
 
     def save_model(self, path):
-        torch.save(self.model.state_dict(), path)
+        torch.save(self.classifier.state_dict(), path)
         print(f"\nModel saved to {path}")

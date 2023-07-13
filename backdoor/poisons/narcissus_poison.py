@@ -27,7 +27,7 @@ class NarcissusDataset(Dataset):
         return len(self.pood) + len(self.target)
     
 
-class FunetuneDataset(Dataset):
+class FinetuneDataset(Dataset):
 
     def __init__(self, dataset, label):
         self.dataset = dataset
@@ -43,7 +43,7 @@ class FunetuneDataset(Dataset):
 
 class NarcissusPoison(PoisonedDataset):
 
-    def __init__(self, device, pood_trainset, target_dataset, surrogate_model, target_class=0):
+    def __init__(self, device, pood_trainset, target_dataset, surrogate_model, trigger_model, target_class=0):
         
         self.device = device
 
@@ -55,10 +55,10 @@ class NarcissusPoison(PoisonedDataset):
         self.target_dataset = Subset(target_dataset, self.target_indices)
 
         # For all the target class samples, returns len(pood_trainset.classes) as the label to train the surrogate model and generate trigger
-        self.modified_target_dataset = FunetuneDataset(self.target_dataset, len(pood_trainset.classes))
+        self.modified_target_dataset = FinetuneDataset(self.target_dataset, len(pood_trainset.classes))
 
         self.surrogate_model = surrogate_model
-        self.warmup_model = deepcopy(surrogate_model)
+        self.trigger_model = trigger_model
 
         batch_size = 350
 
@@ -73,7 +73,6 @@ class NarcissusPoison(PoisonedDataset):
     # Loads the surrogate model if it is already trained
     def load_surrogate(self, surrogate_model):
         self.surrogate_model = surrogate_model
-
 
     def load_warmup(self, warmup_model):
         self.warmup_model = warmup_model
@@ -99,31 +98,39 @@ class NarcissusPoison(PoisonedDataset):
                 surrogate_optimizer.step()
             surrogate_scheduler.step()
             avg_loss = sum(loss_list) / len(loss_list)
-            print('Epoch: {} \tLoss: {:.6f}'.format(epoch, avg_loss))
+            print(f'Epoch: {epoch} \tLoss: {avg_loss}')
         
         torch.save(self.surrogate_model.state_dict(), 'surrogate_model.pth')
 
 
     # Warmup the surrogate model on the target class dataset
-    def poi_warmup(self, warmup_epochs, warmup_model, criterion, warmup_opt):
-        self.warmup_model = warmup_model
-        self.warmup_model.load_state_dict(self.surrogate_model.state_dict())
+    def poi_warmup(self, warmup_epochs, criterion, warmup_opt):
+        
+        self.warmup_model = self.trigger_model
 
+        self.warmup_model.train()
+        for param in self.warmup_model.parameters():
+            param.requires_grad = True
+
+        self.warmup_model.load_state_dict(self.surrogate_model.state_dict())
+        self.warmup_optimizer = warmup_opt(self.warmup_model.parameters(), lr=0.1)
         self.warmup_model.to(self.device)
 
         for epoch in range(warmup_epochs):
             self.warmup_model.train()
             loss_list = []
-            for images, labels in self.surrogate_loader:
+            for images, labels in self.poi_warm_up_loader:
                 images, labels = images.to(self.device), labels.to(self.device)
                 self.warmup_model.zero_grad()
                 outputs = self.warmup_model(images)
                 loss = criterion(outputs, labels)
-                loss.backward()
-                loss_list.append(loss.item())
-                warmup_opt.step()
-            avg_loss = sum(loss_list) / len(loss_list)
-            print('Epoch: {} \tLoss: {:.6f}'.format(epoch, avg_loss))
+                loss.backward(retain_graph=True)
+                loss_list.append(float(loss.data))
+                self.warmup_optimizer.step()
+
+            ave_loss = np.average(np.array(loss_list))
+            print('Epoch:%d, Loss: %e' % (epoch, ave_loss))
+        
         torch.save(self.warmup_model.state_dict(), 'warmup_model.pth')
 
     
@@ -146,22 +153,28 @@ class NarcissusPoison(PoisonedDataset):
         for round in range(trigger_gen_epochs):
             loss_list = []
             for images, labels in trigger_gen_loaders:
+                
                 images, labels = images.to(self.device), labels.to(self.device)
                 new_images = images.clone()
                 clamped_noise = torch.clamp(noise, -lr_inf_r*2, lr_inf_r*2)
                 new_images += clamped_noise
-                per_logits = self.warmup_model(new_images)
-                loss = criterion(per_logits, labels)
+                new_images = torch.clamp(new_images, -1, 1)
                 
-                optimizer.zero_grad()
+                per_logits = self.warmup_model(new_images)
+                
+                loss = criterion(per_logits, labels)
+                loss = torch.mean(loss)
+                loss_list.append(float(loss.data))
                 loss.backward(retain_graph=True)
+
+                optimizer.zero_grad()
                 optimizer.step()
 
-                loss_list.append(loss.item())
+                
 
             avg_loss = sum(loss_list) / len(loss_list)
             avg_grad = torch.mean(torch.abs(noise.grad.data))
-            print('Round: {} \tLoss: {:.6f} \tAvg Grad: {:.6f}'.format(round, avg_loss, avg_grad))
+            print(f'Round: {round} \tLoss: {avg_loss} \tAvg Grad: {avg_grad}')
 
             if avg_grad == 0:
                 break
