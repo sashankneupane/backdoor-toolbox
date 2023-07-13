@@ -9,7 +9,21 @@ from torchvision import transforms
 class PoisonedDataset(torch.utils.data.Dataset):
 
 
-    def __init__(self, dataset, poison_type, poison_ratio, target_class, mask, poison, log_file=None, seed=None):
+    def __init__(self, dataset, poison_ratio, poison_type, target_class, mask, poison, log_file=None, seed=None):
+
+        '''
+            Base class for poisoned Datasets for all the attacks implemented in this repo.
+
+            Args:
+                dataset (torch.utils.data.Dataset): Dataset to poison. Can be both train or test.
+                poison_ratio (float): Ratio of samples to poison. 0 <= poison_ratio <= 1.
+                poison_type (str): Type of poisoning to perform. Can be 'clean' or 'dirty'.
+                target_class (int): Class to target for poisoning.
+                mask (torch.Tensor): Mask to apply to trigger.
+                poison (torch.Tensor): Trigger to apply to samples.
+                log_file (str): Path to log file.
+                seed (int): Seed for randomness in the experiments and attacks.
+        '''
         
         # set seed if provided
         if seed:
@@ -19,19 +33,22 @@ class PoisonedDataset(torch.utils.data.Dataset):
 
         # initialize variables
         self.dataset = dataset
-        self.poison_type = poison_type
         self.poison_ratio = poison_ratio
+        self.poison_type = poison_type
         self.target_class = target_class
+        self.mask = mask
+        self.poison = poison
 
-        self.sample_shape = transforms.ToTensor()(dataset[0][0]).shape
+        self.sample_shape = dataset[0][0].shape
         
-        # track original labels for future use
-        self.original_labels = dataset.targets
         # get number of classes
-        self.num_classes = len(set(self.original_labels))
+        if isinstance(self.dataset, torch.utils.data.Subset):
+            self.num_classes = len(set(self.dataset.dataset.classes))
+        else:
+            self.num_classes = len(set(self.dataset.classes))
 
         # get indices of poisoned samples
-        if self.poison_type == 'dirty':        
+        if self.poison_type == 'dirty':
             self.num_poisoned_samples = int(self.poison_ratio * len(dataset))
             # replace=False ensures no duplicates
             self.poisoned_indices = set(np.random.choice(range(len(dataset)), self.num_poisoned_samples, replace=False)) 
@@ -41,56 +58,115 @@ class PoisonedDataset(torch.utils.data.Dataset):
             self.num_poisoned_samples = int(self.poison_ratio * len(target_indices))
             self.poisoned_indices = set(np.random.choice(target_indices, self.num_poisoned_samples))
 
-        # check if mask and poison are provided
-        if mask is None or poison is None:
-            self.mask, self.poison = self.get_poison()
-        else:
-            self.mask = mask
-            self.poison = poison
-
+        # Setup logger
         self.logger = self.setup_logger(log_file)
 
-    # function to get the poison for different kind of poisoning techniques
+        # Validate arguments
+        self.validate()
+
+
+    def validate(self):
+        
+        '''
+            Method that validates the arguments passed to the constructor.
+        '''
+
+        # check if dataset is an instance of accepted classes
+        # ImageFolder and Subset are subclasses of torch.utils.data.Dataset so they are accepted
+        if not isinstance(self.dataset, torch.utils.data.Dataset):
+            raise ValueError('Dataset must be an instance of torch.utils.data.Dataset.')
+
+        # poison ratio must be floats between 0 and 1. check if they can be converted to floats
+        self.poison_ratio = float(self.poison_ratio)
+        if self.poison_ratio < 0 or self.poison_ratio > 1:
+            raise ValueError('Poison ratio must be between 0 and 1.')
+        
+        # poison type must be either 'clean' or 'dirty'
+        if self.poison_type not in ['clean', 'dirty']:
+            raise ValueError('Poison type must be either \'clean\' or \'dirty\'.')
+        
+        # target class must be between 0 and num_classes - 1
+        self.target_class = int(self.target_class)
+        if self.target_class != -1 and (self.target_class < 0 or self.target_class > self.num_classes - 1):
+            raise ValueError('Target class must be between 0 and num_classes - 1.')
+
+        if self.poison_type == 'clean' and (self.target_class < 0 and self.target_class > self.num_classes - 1):
+            raise ValueError('Target class must be specified when poisoning clean.')
+
+
     @abstractmethod
     def get_poison(self):
-        return NotImplementedError("get_poison() is an abstract method and needs to be implemented in the child class")
+        '''
+            Abstract method to get the poison for different kind of poisoning techniques.
+        '''
+        return NotImplementedError("get_poison() is an abstract method and needs to be implemented in the child class.")
     
 
-    # caannot use this function before poisoning the dataset because the poisoned dataset is not yet created
     def __getitem__(self, index):
 
-        # (TODO) check if the index is tensor !!! Took two hours for me to figure it out T_T
+        '''
+            Method to get a sample from the dataset. Cannot use this before poisoning the dataset because poisoned_dataset is not yet created.
+
+            Args:
+                index (int): Index of the sample to get.
+            
+            Returns:
+                tuple: (sample, label, poisoned_label)
+        '''
 
         sample, label = self.dataset[index]
         poisoned_label = -1
-        # check if the sample is poisoned
+
+        # Poison the label if the sample is poisoned
         if index in self.poisoned_indices:
-            sample, poisoned_label = self.poison_sample(sample, label)
-        # helps to keep track of the original labels
+            poisoned_label = self.poison_label(label)
+        
+        # Return the clean sample, label and the poisoned label
         return sample, label, poisoned_label
 
 
-    # similarly cannot use this function as well
+
     def __len__(self):
-        # return length of the (poisoned) dataset
+        '''
+            Method to get the length of the dataset. Cannot use this before poisoning the dataset because poisoned_dataset is not yet created.
+
+            Returns:
+                int: Length of the dataset.
+        '''
         return len(self.dataset)
 
 
-    # function to get the poisoned dataset if user wishes
+
     @property
     def poisoned_dataset(self):
+        '''
+            Property to get the poisoned dataset.
+        '''
         return self.poison_transform(self.dataset, self.poison_ratio)
 
     
-    # function to get the original targets of the dataset
+
     @property
     def original_targets(self):
+        '''
+            Property to get the original targets of the dataset.
+
+            Returns:
+                torch.Tensor: Original targets of the dataset.
+        '''
         return self.dataset.targets
 
-    # function to get the targets of the poisoned dataset
+
     @property
-    def targets(self):
-        # first get the original targets
+    def poisoned_targets(self):
+        '''
+            Property to get the targets of the poisoned dataset.
+
+            Returns:
+                torch.Tensor: Targets of the poisoned dataset.
+        '''
+
+        # get the targets of the dataset
         targets = self.dataset.targets
         # clone the targets
         poisoned_targets = targets.clone()
@@ -98,11 +174,21 @@ class PoisonedDataset(torch.utils.data.Dataset):
         for idx in self.poisoned_indices:
             poisoned_targets[idx] = self.poison_label(targets[idx])
         # iterate through the dataset and get poisoned labels as a tensor
+        
         return poisoned_targets
 
 
-    # Get poisoned label based on the type of poisoning
+
     def poison_label(self, label):
+        '''
+            Method to poison the label based on the target class and poison type.
+
+            Args:
+                label (int): Label before poison transformation.
+
+            Returns:
+                int: Label after poison transformation.
+        '''
 
         # -1 corresponds to all classes
         if self.target_class == -1:
@@ -113,21 +199,48 @@ class PoisonedDataset(torch.utils.data.Dataset):
         return poisoned_label
 
 
-    # Poison a single sample
-    def poison_sample(self, sample, label):
+
+    def poison_sample(self, sample, label, mask=None, poison=None):
+        '''
+            Method to poison a sample.
+
+            Args:
+                sample (torch.Tensor): Sample to be poisoned.
+                label (int): Label of the sample to be poisoned.
+                mask (torch.Tensor): Mask to be applied to the sample. Defaults to self.mask
+                poison (torch.Tensor): Poison to be added to the sample. Defaults to self.poison 
+            Returns:
+                tuple: (poisoned_sample, poisoned_label)
+        '''
+
+        # Default values for mask and poison if not provided
+        if mask is None:
+            mask = self.mask
+        if poison is None:
+            poison = self.poison
 
         poisoned_sample = sample.clone()
 
         # apply mask
-        poisoned_sample = sample * self.mask
+        poisoned_sample = sample * mask
 
         # add poison
-        poisoned_sample.add_(self.poison)
+        poisoned_sample.add_(poison)
 
         return poisoned_sample, self.poison_label(label)
     
 
     def setup_logger(self, log_file):
+        '''
+            Method to setup the logger.
+
+            Args:
+                log_file (str): Path to the log file.
+
+            Returns:
+                logging.Logger: Logger object.
+        '''
+
         # Setup logger
         logger = logging.getLogger(__name__)
 
@@ -158,8 +271,11 @@ class PoisonedDataset(torch.utils.data.Dataset):
         return logger
     
 
-# Dataset that only returns the labels
+
 class Labels(torch.utils.data.Dataset):
+    '''
+        Class to get the labels of a dataset.
+    '''
     def __init__(self, dataset):
         self.dataset = dataset
     

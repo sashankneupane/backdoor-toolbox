@@ -1,10 +1,10 @@
-from .badnets_poison import BadNetPoison
+from .badnets_poison import BadNetsPoison
 from .lira_poison import LiraPoison
 from .narcissus_poison import NarcissusPoison
 from .htba_poison import HTBAPoison
 
 __all__ = [
-    "BadNetPoison",
+    "BadNetsPoison",
     "LiraPoison",
     "NarcissusPoison",
     "HTBAPoison",

@@ -1,4 +1,5 @@
 import os
+import random
 
 from PIL import Image
 import torch
@@ -6,65 +7,149 @@ import torchvision.transforms as transforms
 
 from ._poisoned_dataset import PoisonedDataset
 
-class BadNetPoison(PoisonedDataset):
+class BadNetsPoison(PoisonedDataset):
 
 
-    def __init__(self, dataset, poison_ratio, target_class, poison_type, trigger_img, trigger_size, mask=None, poison=None):
+    def __init__(
+            self, 
+            dataset, 
+            target_class, 
+            poison_ratio, 
+            poison_type, 
+            trigger_img, 
+            trigger_size,
+            random_loc=False, 
+            mask=None, 
+            poison=None
+        ):
 
-        # initialize variables
+        '''
+        Args:
+            dataset (torch.utils.data.Dataset): Dataset to be poisoned
+            target_class (int): Target class for the attack
+            poison_ratio (float): Ratio of poisoned samples in the dataset
+            poison_type (str): Type of poison. Can be 'clean' or 'dirty'
+            trigger_img (str): Name of the trigger image to use
+            trigger_size (int): Size of the trigger image
+            mask (torch.Tensor): Mask to apply to trigger, if already available
+            poison (torch.Tensor): Trigger to apply to samples, if already available
+        '''
+
         self.trigger_img = trigger_img
         self.trigger_size = trigger_size
+        self.random_loc = random_loc
 
-        # call parent constructor which will call get_poison() function
-        super().__init__(dataset, poison_type, poison_ratio, target_class, mask, poison)
+        super().__init__(dataset, poison_ratio, poison_type, target_class, mask, poison)
 
-
-    # function to get the poison and its mask
-    def get_poison(self):
-
-        # load trigger image
+        # load trigger image and transform it to a tensor
         trigger_img_path = os.path.join(os.path.dirname(__file__), 'triggers' , self.trigger_img + '.png')
-        poison = Image.open(trigger_img_path).resize((self.trigger_size, self.trigger_size))
-        poison = transforms.ToTensor()(poison)
+        trigger = Image.open(trigger_img_path).resize((self.trigger_size, self.trigger_size))
+        self.trigger = transforms.ToTensor()(trigger)
 
+
+        # If random_loc is False, then fix the location of the trigger
+        if not random_loc:
+            
+            _ , img_height, img_width = self.sample_shape
+            _ , trigger_height, trigger_width = self.trigger.shape
+
+            # pass the position of the trigger to bottom right corner
+            x_start_pos = img_width - trigger_width - 1
+            y_start_pos = img_height - trigger_height - 1
+
+            self.mask, self.poison = self.get_poison(x_start_pos, y_start_pos)
+
+
+    def __getitem__(self, index):
+
+        '''
+            Method to get a sample from the dataset.
+
+            Args:
+                index (int): Index of the sample to get
+
+            Returns:
+                tuple: (poisoned_sample, label, poisoned_label)
+        '''
+
+        sample, label = self.dataset[index]
+
+        if index not in self.poisoned_indices:
+            return sample, label, -1
+            
+        if self.random_loc:
+            mask, poison = self.get_poison()
+            poisoned_sample, poisoned_label = self.poison_sample(sample, label, mask, poison)
+        else:
+            poisoned_sample, poisoned_label = self.poison_sample(sample, label)
+
+        return poisoned_sample, label, poisoned_label
+
+    
+    def get_poison(self, x_start_pos=None, y_start_pos=None):
+
+        '''
+            Method to get the poison and its mask for BadNets.
+
+            Returns:
+                mask (torch.Tensor): Mask to apply to trigger
+                poison (torch.Tensor): Trigger to apply to samples
+        '''
+
+        # Get the shape of the image and the trigger
         img_channels, img_height, img_width = self.sample_shape
-        poison_channels, poison_height, poison_width = poison.shape
+        trigger_channels, trigger_height, trigger_width = self.trigger.shape
 
-        if poison_channels > img_channels:
+        # Check channels consistency of the trigger and the image and fix it if necessary
+        if trigger_channels > img_channels:
             # only use the first img_channels channels of the trigger
-            poison = poison[:img_channels, :, :]
-        elif poison_channels < img_channels:
+            poison = self.trigger[:img_channels, :, :]
+        elif trigger_channels < img_channels:
             # copy the trigger to all channels
-            poison = torch.cat([poison] * img_channels, dim=0)
+            poison = torch.cat([self.trigger] * img_channels, dim=0)
         
-        # get the position of the trigger (-->TODO: make this random)
-        x_pos = img_width - poison_width - 1
-        y_pos = img_height - poison_height - 1
+        if not x_start_pos and not y_start_pos:
+            # Create a random position for the trigger
+            x_start_pos = random.randint(0, img_width - trigger_width - 1)
+            y_start_pos = random.randint(0, img_height - trigger_height - 1)
 
         # create a mask of the same size as the image
         mask = torch.ones((img_channels, img_height, img_width))
-        mask[:, y_pos:y_pos+poison_height, x_pos:x_pos+poison_width] = 0
+        mask[:, y_start_pos:y_start_pos+trigger_height, x_start_pos:x_start_pos+trigger_width] = 0
 
         # creating trigger mask to expand poison to the size of the image
         trigger_mask = torch.zeros((img_channels, img_height, img_width))
-        trigger_mask[:, y_pos:y_pos+poison_height, x_pos:x_pos+poison_width] = poison
+        trigger_mask[:, y_start_pos:y_start_pos+trigger_height, x_start_pos:x_start_pos+trigger_width] = poison
 
         # poison is a mask with 1 everywhere except where the trigger is
         poison = trigger_mask
 
         return mask, poison
 
+
     # returns a poisoned dataset instance with the same parameters as the current instance
     # useful to poison test dataset with the same parameters as the train dataset
     def poison_transform(self, dataset, poison_ratio):
 
+        '''
+            Method to return a poisoned BadNets dataset with the same parameters as the current instance.
+
+            Args:
+                dataset (torch.utils.data.Dataset): Dataset to be poisoned
+                poison_ratio (float): Ratio of poisoned samples
+            
+            Returns:
+                BadNetsPoison: Poisoned dataset
+        '''
+
         return type(self)(
-            dataset,
+            dataset=dataset,
+            target_class=self.target_class,
             poison_ratio=poison_ratio, 
-            target_class=self.target_class, 
             poison_type=self.poison_type, 
             trigger_img=self.trigger_img, 
-            trigger_size=self.trigger_size, 
-            mask=self.mask, 
+            trigger_size=self.trigger_size,
+            random_loc=self.random_loc,
+            mask=self.mask,
             poison=self.poison
         )
