@@ -1,3 +1,5 @@
+import time
+
 import torch
 from torch.utils.data import Subset, DataLoader
 
@@ -17,6 +19,7 @@ class BadNets(Attack):
         batch_size,  
         optimizer, 
         loss_function,
+        scheduler=None,
         logfile=None,
         seed=None
         ) -> None:
@@ -41,6 +44,7 @@ class BadNets(Attack):
         self.epochs = epochs
         self.optimizer = optimizer
         self.loss_function = loss_function
+        self.scheduler = scheduler
 
         # Keep track of original test labels and create a clean test loader for evaluation pruposes
         self.clean_testloader = DataLoader(self.testset, batch_size=self.batch_size, shuffle=False)
@@ -61,6 +65,9 @@ class BadNets(Attack):
                 trigger_size (int): Size of the trigger
                 eval_every (int): Evaluate the attack every eval_every epochs
         '''
+
+        # Track the time taken for the attack
+        start = time.time()
 
         self.log_poison_info(poison_ratio, poison_type, trigger_img, trigger_size)
         self.logger.info(f'BEGIN ATTACK\n')
@@ -93,10 +100,10 @@ class BadNets(Attack):
             running_loss = 0.0
 
             # data is a tuple of (inputs, labels, poisoned_labels) where poisoned_label = -1 if the sample is not poisoned
-            for _, (inputs, labels, poisoned_labels) in enumerate(self.trainloader):
+            for _, (poisoned_samples, labels, poisoned_labels) in enumerate(self.trainloader):
                 
                 # move tensors to the configured device
-                inputs = inputs.to(self.device)
+                poisoned_samples = poisoned_samples.to(self.device)
 
                 # change the poisoned_labels to the original labels when the poisoned_labels are -1
                 poisoned_labels = torch.where(poisoned_labels == -1, labels, poisoned_labels)
@@ -105,9 +112,9 @@ class BadNets(Attack):
                 # Zero the parameter gradients
                 self.optimizer.zero_grad()
                 # Forward pass
-                outputs = self.classifier(inputs)
+                poisoned_outputs = self.classifier(poisoned_samples)
                 # Compute loss
-                loss = self.loss_function(outputs, poisoned_labels)
+                loss = self.loss_function(poisoned_outputs, poisoned_labels)
                 # Backward pass
                 loss.backward()
                 # Optimize
@@ -115,11 +122,20 @@ class BadNets(Attack):
 
                 # Keep track of running loss
                 running_loss += loss.item()
+
+            running_loss /= len(self.trainloader)
+
+            # step the scheduler
+            if self.scheduler is not None:
+                self.scheduler.step()
             
             # Evaluate the attack after every eval_epochs
             if (epoch+1) % eval_every == 0:
                 self.evaluate_attack(running_loss)
 
+        # Log the time taken for the attack
+        end = time.time()
+        self.logger.info(f'Attack completed in {(end-start):.4f} seconds\n')
 
 
     def evaluate_attack(self, running_loss):
@@ -168,13 +184,13 @@ class BadNets(Attack):
 
         with torch.no_grad():
             # Iterate over the non-target samples
-            for samples, labels, poisoned_labels in self.asr_dataloader:
-                samples, poisoned_labels = samples.to(self.device), poisoned_labels.to(self.device)
-                outputs = self.classifier(samples)
+            for poisoned_samples, labels, poisoned_labels in self.asr_dataloader:
+                poisoned_samples, poisoned_labels = poisoned_samples.to(self.device), poisoned_labels.to(self.device)
+                outputs = self.classifier(poisoned_samples)
                 _, predicted = torch.max(outputs, 1)
 
                 # Update the number of correct attack predictions
-                attack_success_count += (predicted != poisoned_labels).sum().item()
+                attack_success_count += (predicted == poisoned_labels).sum().item()
 
         # Calculate the attack success rate and log it
         attack_success_rate = attack_success_count / len(self.non_target_indices)
@@ -192,6 +208,8 @@ class BadNets(Attack):
         self.logger.info(f'Epochs: {self.epochs}')
         self.logger.info(f'Batch Size: {self.batch_size}')
         self.logger.info(f'Optimizer: {self.optimizer}')
+        if self.scheduler is not None:
+            self.logger.info(f'Scheduler: {self.scheduler}')
         self.logger.info(f'Loss Function: {self.loss_function}')
         if self.seed:
             self.logger.info(f'Seed: {self.seed}')

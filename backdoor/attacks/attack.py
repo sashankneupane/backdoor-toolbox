@@ -91,4 +91,4 @@ class Attack(abc.ABC):
 
     def save_model(self, path):
         torch.save(self.classifier.state_dict(), path)
-        print(f"\nModel saved to {path}")
+        self.logger.info(f"\nModel saved to {path}")
