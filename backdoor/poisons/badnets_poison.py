@@ -7,6 +7,10 @@ import torchvision.transforms as transforms
 
 from ._poisoned_dataset import PoisonedDataset
 
+'''
+Implementation more or less finalized. Needs testing.
+'''
+
 class BadNetsPoison(PoisonedDataset):
 
 

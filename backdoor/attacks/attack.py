@@ -5,6 +5,10 @@ import abc
 import torch
 import numpy as np
 
+'''
+Do not change this class until absolutely required to avoid breaking the code.
+'''
+
 class Attack(abc.ABC):
 
     def __init__(
