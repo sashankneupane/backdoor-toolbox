@@ -1,7 +1,10 @@
 from copy import deepcopy
+
 import numpy as np
 import torch
-from torch import nn, optim
+import torch.nn as nn
+import torch.optim as optim
+
 from torch.utils.data import DataLoader, Dataset, Subset
 
 from ._poisoned_dataset import PoisonedDataset
@@ -15,6 +18,7 @@ class NarcissusDataset(Dataset):
         self.target = targetclass_dataset
 
     def __getitem__(self, index):
+
         if index < len(self.pood):
             return self.pood[index]
         else:
@@ -43,22 +47,19 @@ class FinetuneDataset(Dataset):
 
 class NarcissusPoison(PoisonedDataset):
 
-    def __init__(self, device, pood_trainset, target_dataset, surrogate_model, trigger_model, target_class=0):
+    def __init__(self, device, pood_trainset, target_dataset, surrogate_model, trigger_model):
         
         self.device = device
 
         self.pood_trainset = pood_trainset
-        # creating dataset with only the target class
-
-        self.target_class = target_class
-        self.target_indices = np.where(np.array(target_dataset.targets) == target_class)[0]
-        self.target_dataset = Subset(target_dataset, self.target_indices)
+        self.target_dataset = target_dataset
 
         # For all the target class samples, returns len(pood_trainset.classes) as the label to train the surrogate model and generate trigger
         self.modified_target_dataset = FinetuneDataset(self.target_dataset, len(pood_trainset.classes))
 
         self.surrogate_model = surrogate_model
         self.trigger_model = trigger_model
+        self.warmup_model = self.trigger_model
 
         batch_size = 350
 
@@ -71,19 +72,16 @@ class NarcissusPoison(PoisonedDataset):
 
 
     # Loads the surrogate model if it is already trained
-    def load_surrogate(self, surrogate_model):
-        self.surrogate_model = surrogate_model
+    def load_surrogate(self, path='./surrogate_model.pth'):
+        self.surrogate_model.load_state_dict(torch.load(path))
 
-    def load_warmup(self, warmup_model):
-        self.warmup_model = warmup_model
+    def load_warmup(self, path='./warmup_model.pth'):
+        self.warmup_model.load_state_dict(torch.load(path))
 
     # Train the surrogate model on POOD dataset
-    def train_surrogate(self, sur_epochs, criterion, surrogate_opt, surrogate_scheduler):
+    def train_surrogate(self, sur_epochs, criterion, surrogate_optimizer, surrogate_scheduler):
 
         loss_list = []
-
-        surrogate_optimizer = surrogate_opt(self.surrogate_model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
-        surrogate_scheduler = surrogate_scheduler(surrogate_optimizer, T_max=sur_epochs)
         
         for epoch in range(0, sur_epochs):
             self.surrogate_model.train()
@@ -96,6 +94,7 @@ class NarcissusPoison(PoisonedDataset):
                 loss.backward()
                 loss_list.append(loss.item())
                 surrogate_optimizer.step()
+
             surrogate_scheduler.step()
             avg_loss = sum(loss_list) / len(loss_list)
             print(f'Epoch: {epoch} \tLoss: {avg_loss}')
@@ -107,13 +106,13 @@ class NarcissusPoison(PoisonedDataset):
     def poi_warmup(self, warmup_epochs, criterion, warmup_opt):
         
         self.warmup_model = self.trigger_model
+        self.warmup_model.load_state_dict(self.surrogate_model.state_dict())
+        self.warmup_optimizer = warmup_opt(self.warmup_model.parameters(), lr=0.1)
 
         self.warmup_model.train()
         for param in self.warmup_model.parameters():
             param.requires_grad = True
 
-        self.warmup_model.load_state_dict(self.surrogate_model.state_dict())
-        self.warmup_optimizer = warmup_opt(self.warmup_model.parameters(), lr=0.1)
         self.warmup_model.to(self.device)
 
         for epoch in range(warmup_epochs):
@@ -143,10 +142,7 @@ class NarcissusPoison(PoisonedDataset):
             param.requires_grad = False
         
         dataset_shape = self.target_dataset[0][0].shape
-        noise = torch.zeros((1, *dataset_shape))
-        noise = noise.to(self.device)
-        
-        noise = torch.autograd.Variable(noise, requires_grad=True)
+        noise = torch.zeros((1, *dataset_shape), requires_grad=True, device=self.device)
 
         optimizer = optimizer([noise], lr=lr_inf_r_step)
 
@@ -165,15 +161,15 @@ class NarcissusPoison(PoisonedDataset):
                 loss = criterion(per_logits, labels)
                 loss = torch.mean(loss)
                 loss_list.append(float(loss.data))
-                loss.backward(retain_graph=True)
-
+                
                 optimizer.zero_grad()
+                loss.backward(retain_graph=True)
                 optimizer.step()
 
                 
-
-            avg_loss = sum(loss_list) / len(loss_list)
-            avg_grad = torch.mean(torch.abs(noise.grad.data))
+            avg_loss = np.average(np.array(loss_list))
+            avg_grad = np.sum(abs(noise.grad).detach().cpu().numpy())
+            
             print(f'Round: {round} \tLoss: {avg_loss} \tAvg Grad: {avg_grad}')
 
             if avg_grad == 0:
