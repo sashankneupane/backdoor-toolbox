@@ -1,9 +1,9 @@
 from .badnets import BadNets
-from .lira import LiraAttack
+from .lira import LIRA
 from .narcissus import NarcissusAttack
 
 __all__ = [
     "BadNets",
-    "LiraAttack",
+    "LIRA",
     "NarcissusAttack"
 ]

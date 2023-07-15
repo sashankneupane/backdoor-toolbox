@@ -12,7 +12,7 @@ class LiraPoison(PoisonedDataset):
             eps,
             trigger_model=None,
             poison_type='dirty', 
-            poison_ratio=1.0
+            poison_ratio=1.0,
         ) -> None:
 
         '''
@@ -27,12 +27,7 @@ class LiraPoison(PoisonedDataset):
                 poison_ratio (float): Poison ratio for the attack
         '''
         
-        # Bypass the PoisonedDataset get_poison() call with these dummy mask and poison
-        # which does not affect the sample
-        mask = torch.ones(dataset[0][0].shape)
-        poison = torch.zeros(dataset[0][0].shape)
-
-        super().__init__(dataset, poison_type, poison_ratio, target_class, mask, poison)
+        super().__init__(dataset, poison_ratio, poison_type, target_class)
 
         # Set the stealthiness constraint and the trigger model
         self.eps = eps
@@ -52,7 +47,7 @@ class LiraPoison(PoisonedDataset):
                 tuple: (sample, label, poisoned_label) where poisoned_label is -1 if the sample is not poisoned
 
             Poison is not applied to the sample here. Lira Attack requires the clean samples as well when attacking to
-            calculate the loss, so the poisoning is done in the attack method of the LiraAttack class instead.
+            calculate the loss, so the poisoning is done in the attack method of the LIRA class instead.
         '''
 
         sample, label = self.dataset[index]
@@ -70,7 +65,7 @@ class LiraPoison(PoisonedDataset):
 
         '''
             This method overrides the poison_sample method of the PoisonedDataset class.
-            This method is not used during training phase as apply_trigger function of LiraAttack is used.
+            This method is not used during training phase as apply_trigger function of LIRA is used.
 
             Args:
                 sample (tensor): Sample
@@ -83,7 +78,7 @@ class LiraPoison(PoisonedDataset):
             should be in the same device when this method is being called.
         '''
 
-        if self.trigger:
+        if self.trigger_model:
             
             poisoned_sample = sample.clone()
             poisoned_sample += self.trigger_model(sample) * self.eps

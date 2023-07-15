@@ -9,7 +9,7 @@ from torchvision import transforms
 class PoisonedDataset(torch.utils.data.Dataset):
 
 
-    def __init__(self, dataset, poison_ratio, poison_type, target_class, mask, poison, log_file=None, seed=None):
+    def __init__(self, dataset, poison_ratio, poison_type, target_class, mask=None, poison=None, log_file=None, seed=None):
 
         '''
             Base class for poisoned Datasets for all the attacks implemented in this repo.
