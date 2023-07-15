@@ -109,12 +109,13 @@ class BadNets(Attack):
                 poisoned_labels = torch.where(poisoned_labels == -1, labels, poisoned_labels)
                 poisoned_labels = poisoned_labels.to(self.device)
 
-                # Zero the parameter gradients
-                self.optimizer.zero_grad()
                 # Forward pass
                 poisoned_outputs = self.classifier(poisoned_samples)
                 # Compute loss
                 loss = self.loss_function(poisoned_outputs, poisoned_labels)
+                
+                # Zero the parameter gradients
+                self.optimizer.zero_grad()
                 # Backward pass
                 loss.backward()
                 # Optimize
