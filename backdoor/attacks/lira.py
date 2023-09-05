@@ -1,9 +1,6 @@
+# from math import ceil, floor
 import time
-from math import ceil, floor
 from copy import deepcopy
-
-import warnings
-warnings.filterwarnings("ignore")
 
 import torch
 from torch import nn
@@ -11,55 +8,6 @@ import torchvision.transforms as transforms
 
 from .attack import Attack
 from ..poisons import LiraPoison
-
-
-# Model pipeline to handle all forward passes for the LIRA attack
-class LiraModel(nn.Module):
-
-    def __init__(self, trigger_model, fixed_trigger_model, classifier, eps, min_val=None, max_val=None):
-        
-        super().__init__()
-
-        # running trigger model
-        self.trigger_model = trigger_model
-        # fixed trigger model
-        self.fixed_trigger_model = fixed_trigger_model
-
-        # freeze the fixed trigger_model
-        self.freeze_trigger_model()
-
-        # classifier model
-        self.classifier = classifier
-
-        self.eps = eps
-
-        self.min_val = min_val
-        self.max_val = max_val
-
-    def clip_image(self, x):
-        return torch.clamp(x, self.min_val, self.max_val)
-
-    def freeze_trigger_model(self): 
-        for param in self.fixed_trigger_model.parameters():
-            param.requires_grad = False
-
-    def forward(self, x, poison=False, update='classifier', eps=None):
-
-        if eps is None:
-            eps = self.eps
-
-        if poison:
-            if update == 'trigger':
-                x = x + self.trigger_model(x) * self.eps
-            elif update == 'classifier':
-                x = x + self.fixed_trigger_model(x) * self.eps
-            else:
-                raise ValueError('update must be either trigger or classifier')
-        
-        x = self.clip_image(x)
-        x = self.classifier(x)
-
-        return x
 
 
 
@@ -124,28 +72,28 @@ class LIRA(Attack):
     
     def set_minmax(self, dataset):
 
-        dataloader = torch.utils.data.DataLoader(
-            dataset, 
-            batch_size=self.batch_size, 
-            shuffle=False, 
-            num_workers=self.num_workers
-        )
+        # dataloader = torch.utils.data.DataLoader(
+        #     dataset, 
+        #     batch_size=self.batch_size, 
+        #     shuffle=False, 
+        #     num_workers=self.num_workers
+        # )
     
-        min_val = float('inf')
-        max_val = float('-inf')
+        # min_val = float('inf')
+        # max_val = float('-inf')
 
-        for samples, _ in dataloader:
-            min_val = min(min_val, samples.min())
-            max_val = max(max_val, samples.max())
-
-        # round up for max_val and round down the min_val if min_val is negative
-        max_val = ceil(max_val)
-        min_val = floor(min_val)
+        # for samples, _ in dataloader:
+        #     min_val = min(min_val, samples.min())
+        #     max_val = max(max_val, samples.max())
         
-        self.min_val = torch.tensor(min_val, device=self.device)
-        self.max_val = torch.tensor(max_val, device=self.device)
+        # # self.min_val = torch.tensor(min_val, device=self.device)
+        # # self.max_val = torch.tensor(max_val, device=self.device)
+         
+        self.min_val = -2.1179039301310043
+        self.max_val = 2.6399999999999997
 
-        self.logger.debug(f'\n\n\nmin_val: {self.min_val}, max_val: {self.max_val}\n\n\n')
+        # self.min_val = 0.0
+        # self.max_val = 1.0
 
 
     def apply_trigger(self, samples, trigger=None, eps=None):
@@ -163,20 +111,21 @@ class LIRA(Attack):
         '''
 
         if trigger is None:
-            trigger = self.trigger_model
+            trigger = self.fixed_trigger_model
         
         if eps is None:
             eps = self.eps
 
-        # if the samples are a batch
+        # check if the samples are a batch of samples or a single sample
         if len(samples.shape) == 4:
-            poisoned_samples = samples + eps * trigger(samples)
+            noise = trigger(samples) * eps
         elif len(samples.shape) == 3:
-            poisoned_samples = samples + eps * trigger(samples.unsqueeze(0)).squeeze(0)
+            noise = trigger(samples.unsqueeze(0)).squeeze(0) * eps
         else:
             raise RuntimeError('Invalid shape of samples. Expected 3 or 4 dimensions.')
+        
+        poisoned_samples = torch.clamp(samples + noise, self.min_val, self.max_val)
 
-        # Clip the poisoned samples to be in the range [-1, 1]        
         return poisoned_samples
     
 
@@ -235,8 +184,8 @@ class LIRA(Attack):
             update_trigger_epochs=1, 
             alpha=0.5, 
             finetune_alpha=0.5,
-            eps=0.01,
-            finetune_test_eps=0.01,
+            eps=0.1,
+            finetune_test_eps=0.1,
             eval_every=1,
         ) -> None:
 
@@ -281,7 +230,7 @@ class LIRA(Attack):
         self.log_attack_info()
         self.logger.info(f'\nBEGIN ATTACK')
 
-        self.attack_model = LiraModel(self.trigger_model, self.fixed_trigger_model, self.classifier, self.eps, self.min_val, self.max_val)
+        # self.attack_model = LiraModel(self.trigger_model, self.fixed_trigger_model, self.classifier, self.eps, self.min_val, self.max_val)
 
         # Stage I LIRA attack with alternating optimization
         self.logger.info('\nStage I LIRA attack with alternating optimization')
@@ -290,9 +239,11 @@ class LIRA(Attack):
         # Track the losses
         self.trainlosses = []
         self.triggerlosses = []
+        self.cleanlosses = []
+        self.poisonedlosses = []
         self.classifierlosses = []
 
-        # self.normalize_transform = self.get_normalization_transform(self.trainset)
+
 
         # Get poisoned_trainset and poisoned_trainloader without passing trigger_model
         self.poisoned_trainset = LiraPoison(self.trainset, self.target_class, self.eps)
@@ -317,12 +268,15 @@ class LIRA(Attack):
 
         # Iterate through the epochs
         for epoch in range(self.epochs):
-
+            
             self.classifier.train()
             self.trigger_model.train()
+            self.fixed_trigger_model.eval()
 
             # Loss list for current epoch
             triggerlosses = []
+            cleanlosses = []
+            poisonedlosses = []
             classifierlosses = []
 
 
@@ -336,45 +290,47 @@ class LIRA(Attack):
 
                 # TRIGGER GENERATOR UPDATE --------------------------------------------------------------------
                 # ---------------------------------------------------------------------------------------------
-                
-                poisoned_outputs = self.attack_model(samples, poison=True, update='trigger')
-                trigger_loss = self.loss_function(poisoned_outputs, poisoned_labels)
 
-                # This will backpropagate the loss to the classifier as well as the running trigger model
+                # Calculate the trigger loss
+                poisoned_samples = self.apply_trigger(samples, trigger=self.trigger_model)
+                poisoned_outputs = self.classifier(poisoned_samples)
+                trigger_loss = self.loss_function(poisoned_outputs, poisoned_labels)
+                
+                # Update the running trigger model
+                self.optimizer.zero_grad()
                 self.trigger_optimizer.zero_grad()
                 trigger_loss.backward()
                 self.trigger_optimizer.step()
 
-
-                # CLASSIFIER UPDATE --------------------------------------------------------------------------
-                # ---------------------------------------------------------------------------------------------
-
-                # Calculate the classifier loss based on the fixed trigger model not the trigger model
-                outputs = self.attack_model(samples)
-                poisoned_outputs = self.attack_model(samples, poison=True, update='classifier')
-
-                clean_loss = self.loss_function(outputs, labels)
-                poisoned_loss = self.loss_function(poisoned_outputs, poisoned_labels)
-                classifier_loss = clean_loss * self.alpha + poisoned_loss * (1 - self.alpha)
-
-                # Clear the gradients (This will also clear gradients accumulated from trigger model update)
-                self.optimizer.zero_grad()
-
-                # This will backpropagate the loss to the classifier as well as the trigger model
-                classifier_loss.backward()
-
-                self.optimizer.step()
-                # We don't need to care about the gradients backpropagated to the fixed trigger model as we won't touch it anywhere in the attacking pipeline
-
-                # Keep track of the losses
-                classifierlosses.append(classifier_loss.item())
+                # Add the trigger loss to the list
                 triggerlosses.append(trigger_loss.item())
 
 
+                # CLASSIFIER UPDATE --------------------------------------------------------------------------
+                # ---------------------------------------------------------------------------------------------
+                poisoned_samples = self.apply_trigger(samples)
+                poisoned_outputs = self.classifier(poisoned_samples)
+                clean_outputs = self.classifier(samples)
+                
+                # Calculate the weighted loss and update the classifier
+                clean_loss = self.loss_function(clean_outputs, labels)
+                poisoned_loss = self.loss_function(poisoned_outputs, poisoned_labels)
+                classifier_loss = clean_loss * self.alpha + poisoned_loss * (1 - self.alpha)
+
+                self.optimizer.zero_grad()
+                classifier_loss.backward()
+                self.optimizer.step()
+                
+                cleanlosses.append(clean_loss.item())
+                poisonedlosses.append(poisoned_loss.item())
+                classifierlosses.append(classifier_loss.item())
+
+
+            
             # Update the weights of the trigger model after update_trigger_epochs
             if (epoch+1) % self.update_trigger_epochs == 0:
 
-                self.fixed_trigger_model.load_state_dict(self.trigger_model.state_dict())
+                self.fixed_trigger_model.load_state_dict(deepcopy(self.trigger_model.state_dict()))
 
                 # Update the trigger model in the poisoned_trainset
                 self.poisoned_trainset.trigger_model = self.fixed_trigger_model
@@ -386,25 +342,29 @@ class LIRA(Attack):
 
             # Add the losses to the running losses list
             self.triggerlosses += triggerlosses
+            self.cleanlosses += cleanlosses
+            self.poisonedlosses += poisonedlosses
             self.classifierlosses += classifierlosses
 
             self.trainlosses.append(avg_classifier_loss)
 
-            # Evaluate the attack every eval_every epochs
-            if (epoch+1) % self.eval_every == 0:
+            # Evaluate the attack every eval_every epochs and at the last epoch
+            if (epoch+1) % self.eval_every == 0 or epoch == self.epochs-1:
                 self.logger.info(f'\nEpoch {epoch+1} Classifier Loss: {avg_classifier_loss} Trigger Loss: {avg_trigger_loss}')
-                asr = self.evaluate_attack(self.eps)
-                
-                # if asr == 1.0 and epoch < self.epochs:
-                #     self.logger.info(f'Attack Successful at epoch {epoch} with ASR {asr}, so early stopping Stage I')
-                #     break
+                asr = self.evaluate_attack(warmup=True, eps=self.eps)
+
+            # self.save_model('./')
 
         # Stage II LIRA attack with backdoor finetuning
         self.logger.info('\nStage II LIRA attack with backdoor finetuning')
 
+
         for epoch in range(self.epochs, self.epochs+self.finetune_epochs):
             
-            self.attack_model.train()
+            # self.attack_model.train()
+            self.classifier.train()
+            self.trigger_model.eval()
+            self.fixed_trigger_model.eval()
 
             finetunelosses = []
 
@@ -414,23 +374,23 @@ class LIRA(Attack):
                 labels = labels.to(self.device)
                 poisoned_labels = poisoned_labels.to(self.device)
 
-                # zero the gradients
-                self.optimizer.zero_grad()
+                poisoned_samples = self.apply_trigger(samples, eps=self.finetune_test_eps)
 
-                outputs = self.attack_model(samples)
-                poisoned_outputs = self.attack_model(samples, poison=True, update='classifier')
+                outputs = self.classifier(samples)
+                poisoned_outputs = self.classifier(poisoned_samples)
                 
                 clean_loss = self.loss_function(outputs, labels)
                 poisoned_loss = self.loss_function(poisoned_outputs, poisoned_labels)
                 
-                classifier_loss = clean_loss * self.alpha + poisoned_loss * (1 - self.alpha)
+                classifier_loss = clean_loss * self.finetune_alpha + poisoned_loss * (1 - self.finetune_alpha)
 
-                # Calculate the total loss
+                # Backward pass and update the classifier
+                self.finetune_optimizer.zero_grad()
                 classifier_loss.backward()
-
-                # Update the weights of the classifier model
-                self.optimizer.step()
+                self.finetune_optimizer.step()
                 
+                self.cleanlosses.append(clean_loss.item())
+                self.poisonedlosses.append(poisoned_loss.item())
                 finetunelosses.append(classifier_loss.item())
             
             self.classifierlosses += finetunelosses
@@ -454,7 +414,7 @@ class LIRA(Attack):
 
 
 
-    def evaluate_attack(self, eps=None):
+    def evaluate_attack(self, warmup=False, eps=None):
 
         '''
             Evaluate the attack with clean test accuracy, target class accuracy, and ASR.
@@ -464,8 +424,39 @@ class LIRA(Attack):
                 classifier_loss(float): average classifier loss for the current epoch
                 trigger_loss(float): average trigger loss for the current epoch
         '''
+
+        # # warm up the classifier
+        # if warmup:
+        #     test_classifier = deepcopy(self.classifier)
+        #     test_classifier.train()
+        #     test_optimizer = torch.optim.SGD(test_classifier.parameters(), lr=1e-2, momentum=0.9)
+
+        #     for samples, labels, poisoned_labels in self.poisoned_trainloader:
+        #         samples = samples.to(self.device)
+        #         labels = labels.to(self.device)
+        #         poisoned_labels = poisoned_labels.to(self.device)
+
+        #         outputs = test_classifier(samples)
+        #         loss = self.loss_function(outputs, labels)
+
+        #         poisoned_samples = self.apply_trigger(samples)
+        #         poisoned_outputs = test_classifier(poisoned_samples)
+        #         poisoned_loss = self.loss_function(poisoned_outputs, poisoned_labels)
+
+        #         test_loss = loss * self.alpha + poisoned_loss * (1 - self.alpha)
+                
+        #         test_optimizer.zero_grad()
+        #         test_loss.backward()
+        #         test_optimizer.step()
+        # else:
+        #     test_classifier = self.classifier
+
+        test_classifier = self.classifier
+
         
-        self.attack_model.eval()
+        self.classifier.eval()
+        self.trigger_model.eval()
+        self.fixed_trigger_model.eval()
 
         if eps is None:
             eps = self.eps
@@ -478,13 +469,12 @@ class LIRA(Attack):
 
         with torch.no_grad():
             
-            for i, (samples, labels) in enumerate(self.clean_testloader):
+            for samples, labels in self.clean_testloader:
 
                 samples = samples.to(self.device)
                 labels = labels.to(self.device)
 
-                outputs = self.attack_model(samples)
-
+                outputs = test_classifier(samples)
                 _, predicted = torch.max(outputs, 1)
 
                 # update the number of correct predictions per class
@@ -515,7 +505,8 @@ class LIRA(Attack):
                 poisoned_labels = poisoned_labels.to(self.device)
 
                 # Get the outputs of the attack model
-                attack_outputs = self.attack_model(samples, poison=True, update='classifier', eps=eps)
+                # attack_outputs = self.attack_model(samples, poison=True, update='classifier', eps=eps)
+                attack_outputs = test_classifier(self.apply_trigger(samples))
                 _, attack_predicted = torch.max(attack_outputs, 1)
 
                 # Update the number of correct attack predictions
@@ -539,9 +530,21 @@ class LIRA(Attack):
         self.logger.info(f'\nEpochs: {self.epochs}')
         self.logger.info(f'Finetune Epochs: {self.finetune_epochs}')
         self.logger.info(f'Update Trigger Epochs: {self.update_trigger_epochs}')
-        self.logger.info(f'Alpha: {self.alpha}')
+        self.logger.info(f'Eps (Stage I): {self.eps}')
+        self.logger.info(f'Alpha (Stage I): {self.alpha}')
+        self.logger.info(f'Eps (Stage II): {self.finetune_test_eps}')
+        self.logger.info(f'Alpha (Stage II): {self.finetune_alpha}')
         self.logger.info(f'\nOptimizer: {self.optimizer}')
         self.logger.info(f'\nTrigger Optimizer: {self.trigger_optimizer}')
         self.logger.info(f'\nFinetune Optimizer: {self.finetune_optimizer}')
         if self.finetune_scheduler is not None:
             self.logger.info(f'\nFinetune Scheduler: {self.finetune_scheduler}')
+
+        
+    def save_models(self, path):
+
+        # save both classifier and trigger model in the same file
+        torch.save({
+            'classifier': self.classifier.state_dict(),
+            'trigger_model': self.trigger_model.state_dict(),
+        }, path)

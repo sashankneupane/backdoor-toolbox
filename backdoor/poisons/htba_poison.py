@@ -104,85 +104,112 @@ class HTBAPoison(PoisonedDataset):
         
     
     def generate_poison(self, batch_size, num_workers):
-            
+        
         for epoch in range(self.epochs):
-            
+
             start = time.time()
             losses = AverageMeter()
 
 
-        
-        # for epoch in range(self.epochs):
+            trigger = trigger.unsqueeze(0).to(self.device)
 
-        #     start = time.time()
-        #     losses = AverageMeter()
+            self.target_dataset = None
+            self.source_dataset = None
 
+            train_target_loader = torch.utils.data.DataLoader(
+                self.target_dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=num_workers,
+                pin_memory=True
+            )
+            train_source_loader = torch.utils.data.DataLoader(
+                self.source_dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=num_workers,
+                pin_memory=True
+            )
 
-            # trigger = trigger.unsqueeze(0).to(self.device)
+            iter_target = iter(train_target_loader)
+            iter_source = iter(train_source_loader)
 
-            # self.target_dataset = None
-            # self.source_dataset = None
+            # Iterators
+            for i in range(len(train_target_loader)):
 
-            # train_target_loader = torch.utils.data.DataLoader(
-            #     self.target_dataset,
-            #     batch_size=batch_size,
-            #     shuffle=True,
-            #     num_workers=num_workers,
-            #     pin_memory=True
-            # )
-            # train_source_loader = torch.utils.data.DataLoader(
-            #     self.source_dataset,
-            #     batch_size=batch_size,
-            #     shuffle=True,
-            #     num_workers=num_workers,
-            #     pin_memory=True
-            # )
+                # load one batch of source and one batch of target
+                (source_samples, source_labels) = next(iter_source)
+                (target_samples, target_labels) = next(iter_target)
 
-            # iter_target = iter(train_target_loader)
-            # iter_source = iter(train_source_loader)
+                # move to device
+                source_samples = source_samples.to(self.device)
+                source_labels = source_labels.to(self.device)
+                target_samples = target_samples.to(self.device)
+                target_labels = target_labels.to(self.device)
 
-            # # Iterators
-            # for i in range(len(train_target_loader)):
+                perturbation = nn.Parameter(torch.zeros(target_samples.shape, requires_grad=True).to(self.device))
 
-            #     # load one batch of source and one batch of target
-            #     (source_samples, source_labels) = next(iter_source)
-            #     (target_samples, target_labels) = next(iter_target)
+                for j in range(self.source_samples.size(0)):
 
-            #     # move to device
-            #     source_samples = source_samples.to(self.device)
-            #     source_labels = source_labels.to(self.device)
-            #     target_samples = target_samples.to(self.device)
-            #     target_labels = target_labels.to(self.device)
+                    if not self.random_loc:
+                        # set trigger in bottom right corner
+                        start_x = self.source_samples.size(2) - self.trigger_size
+                        start_y = self.source_samples.size(3) - self.trigger_size
+                    else:
+                        start_x = torch.randint(0, self.source_samples.size(2) - self.trigger_size, (1,))
+                        start_y = torch.randint(0, self.source_samples.size(3) - self.trigger_size, (1,))
 
-            #     perturbation = nn.Parameter(torch.zeros(target_samples.shape, requires_grad=True).to(self.device))
-
-            #     for j in range(self.source_samples.size(0)):
-
-            #         if not self.random_loc:
-            #             # set trigger in bottom right corner
-            #             start_x = self.source_samples.size(2) - self.trigger_size
-            #             start_y = self.source_samples.size(3) - self.trigger_size
-            #         else:
-            #             start_x = torch.randint(0, self.source_samples.size(2) - self.trigger_size, (1,))
-            #             start_y = torch.randint(0, self.source_samples.size(3) - self.trigger_size, (1,))
-
-            #         # paste trigger on source images
-            #         source_samples[j, :, start_x:start_x+self.trigger_size, start_y:start_y+self.trigger_size] = trigger
-            pass
+                    # paste trigger on source images
+                    source_samples[j, :, start_x:start_x+self.trigger_size, start_y:start_y+self.trigger_size] = trigger
+           
                 
     def __getitem__(self, index):
         return super().__getitem__(index)
     
 
     def save_poisoned_dataset(self, path):
-        pass
+        
+        self.logger.info('Saving poisoned dataset to {}'.format(path))
+        torch.save(self.poison_dataset, path)
 
 
     def poison_sample(self, sample, label):
-        pass
+
+        # get random location for trigger
+        start_x = torch.randint(0, sample.size(1) - self.trigger_size, (1,))
+        start_y = torch.randint(0, sample.size(2) - self.trigger_size, (1,))
+
+        # paste trigger on source images
+        sample[:, start_x:start_x+self.trigger_size, start_y:start_y+self.trigger_size] = self.trigger
+
+        return sample, label
+
 
     def get_poison(self):
-        pass
+        
+        # get random sample from poisoned dataset
+        sample, label = self.poison_dataset[np.random.randint(len(self.poison_dataset))]
+        return self.poison_sample(sample, label)
+
 
     def poison_transform(self, dataset):
-        pass
+        
+        # return the same instance with a different dataset
+        return HTBAPoison(
+            self.device,
+            dataset,
+            self.pretrained_model,
+            self.source_class,
+            self.target_class,
+            self.split_info,
+            self.poison_type,
+            self.trigger_img,
+            self.poison_ratio,
+            self.trigger_size,
+            self.epochs,
+            self.eps,
+            self.lr,
+            self.random_loc,
+            self.log_file,
+            self.seed
+        )
