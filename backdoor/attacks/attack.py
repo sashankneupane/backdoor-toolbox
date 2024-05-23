@@ -5,9 +5,6 @@ import abc
 import torch
 import numpy as np
 
-'''
-Do not change this class until absolutely required to avoid breaking the code.
-'''
 
 class Attack(abc.ABC):
 
@@ -67,7 +64,7 @@ class Attack(abc.ABC):
         if log_file is not None:
             
             # Check if the directory exists
-            from os.path import dirname, exists, realpath
+            from os.path import dirname, exists
             dirpath = dirname(log_file)
             if not exists(dirpath):
                 raise ValueError('Directory does not exist: {}'.format(dirpath))
@@ -92,7 +89,6 @@ class Attack(abc.ABC):
     def evaluate_attack(self):
         raise NotImplementedError("Attack is an abstract class. Please implement the evaluate_attack method.")
 
-
     def save_model(self, path):
         torch.save(self.classifier.state_dict(), path)
-        self.logger.info(f"\nModel saved to {path}")
+        self.logger.info('Model saved to {}'.format(path))

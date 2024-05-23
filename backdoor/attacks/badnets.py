@@ -16,7 +16,7 @@ class BadNets(Attack):
         testset,
         target_class,
         epochs, 
-        batch_size,  
+        batch_size,
         optimizer, 
         loss_function,
         scheduler=None,
@@ -77,7 +77,8 @@ class BadNets(Attack):
         self.trainloader = DataLoader(self.poisoned_trainset, batch_size=self.batch_size, shuffle=True)
 
         # Create Attack success test loader to evaluate the attack success rate
-        self.non_target_indices = torch.where(self.testset.targets != self.target_class)[0]
+        original_labels_tensor = torch.tensor(self.testset.targets)
+        self.non_target_indices = torch.where(original_labels_tensor != self.target_class)[0]
         # Create dataloader for attack success rate evaluation
         asr_dataset = Subset(self.testset, self.non_target_indices)
         self.asr_badnets_poison = BadNetsPoison(

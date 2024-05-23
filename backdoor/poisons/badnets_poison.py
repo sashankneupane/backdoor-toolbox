@@ -46,10 +46,9 @@ class BadNetsPoison(PoisonedDataset):
         super().__init__(dataset, poison_ratio, poison_type, target_class, mask, poison)
 
         # load trigger image and transform it to a tensor
-        trigger_img_path = os.path.join(os.path.dirname(__file__), 'triggers' , self.trigger_img + '.png')
+        trigger_img_path = os.path.join(os.path.dirname(__file__), 'triggers', 'badnets' , self.trigger_img + '.png')
         trigger = Image.open(trigger_img_path).resize((self.trigger_size, self.trigger_size))
         self.trigger = transforms.ToTensor()(trigger)
-
 
         # If random_loc is False, then fix the location of the trigger
         if not random_loc:
@@ -106,11 +105,10 @@ class BadNetsPoison(PoisonedDataset):
 
         # Check channels consistency of the trigger and the image and fix it if necessary
         if trigger_channels > img_channels:
-            # only use the first img_channels channels of the trigger
-            poison = self.trigger[:img_channels, :, :]
-        elif trigger_channels < img_channels:
-            # copy the trigger to all channels
-            poison = torch.cat([self.trigger] * img_channels, dim=0)
+            # convert rgb to grayscale
+            poison = self.trigger.mean(0, keepdim=True)
+        else:
+            poison = self.trigger
         
         if not x_start_pos and not y_start_pos:
             # Create a random position for the trigger
@@ -123,6 +121,7 @@ class BadNetsPoison(PoisonedDataset):
 
         # creating trigger mask to expand poison to the size of the image
         trigger_mask = torch.zeros((img_channels, img_height, img_width))
+        # trigger_mask[:, y_start_pos:y_start_pos+trigger_height, x_start_pos:x_start_pos+trigger_width] = poison
         trigger_mask[:, y_start_pos:y_start_pos+trigger_height, x_start_pos:x_start_pos+trigger_width] = poison
 
         # poison is a mask with 1 everywhere except where the trigger is

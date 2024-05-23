@@ -39,6 +39,8 @@ class PoisonedDataset(torch.utils.data.Dataset):
         self.mask = mask
         self.poison = poison
 
+        self.original_labels = Labels(dataset)
+
         self.sample_shape = dataset[0][0].shape
         
         # get number of classes
