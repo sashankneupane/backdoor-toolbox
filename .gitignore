@@ -21,3 +21,10 @@ models/
 
 ## tensorboard logs
 runs/
+
+
+## models
+*.pth
+
+## pickle files
+*.pkl
