@@ -1,11 +1,10 @@
 import os
 import torch
-from copy import deepcopy
 
 import xml.etree.ElementTree as ET
 
 import torchvision.transforms as transforms
-import torchvision.datasets as datasets
+from torchvision import datasets
 
 from PIL import Image
 
@@ -72,6 +71,7 @@ class BadDetsPoison(datasets.VOCDetection):
         assert poison_ratio >= 0 and poison_ratio <= 1, 'Poison ratio should be between 0 and 1'
         assert attack_type in BadDetsPoison.POISON_TYPES, 'Invalid attack type. Valid types are:' + ', '.join(BadDetsPoison.POISON_TYPES)
         assert target_class in BadDetsPoison.CLASSES, 'Invalid target class. Valid classes are:' + ', '.join(BadDetsPoison.CLASSES)
+        assert per_image >= 1 and per_image <= 10, 'Invalid number of poisons per image. Should be between 1 and 10'
 
         
         self.poison_ratio = poison_ratio
@@ -129,9 +129,8 @@ class BadDetsPoison(datasets.VOCDetection):
         Get the shape of the sample
         '''
         img = Image.open(self.images[0]).convert('RGB')
-        target = self.parse_voc_xml(ET.parse(self.annotations[0]).getroot())
         if self.transforms is not None:
-            img, target = self.transforms(img, target)
+            img = self.transforms(img)
         return img.shape
     
 
@@ -142,15 +141,14 @@ class BadDetsPoison(datasets.VOCDetection):
         '''
         # get clean image and target first
         img = Image.open(self.images[index]).convert('RGB')
-        target = self.parse_voc_xml(ET.parse(self.annotations[index]).getroot())
-
+        target = ET.parse(self.annotations[index]).getroot()
 
         if self.transforms:
-            img, target = self.transforms(img, target)
+            img = self.transforms(img)
 
         if index in self.poisoned_indices:
             poisoned_img, poisoned_target = self.poison_sample(img, target)
-            return img, poisoned_img, target, poisoned_target
+            return poisoned_img, target, poisoned_target
         
         return poisoned_img, target, None
 
@@ -198,9 +196,8 @@ class BadDetsPoison(datasets.VOCDetection):
 
     def _poison_gma(self, img, target):
 
+        # per_image does not matter in this case
         poisoned_img = img.clone()
-
-        poisoned_target = deepcopy(target)
         
         if self.random_loc:
             x_start_pos, y_start_pos = self.get_random_loc()
@@ -210,21 +207,20 @@ class BadDetsPoison(datasets.VOCDetection):
 
         poisoned_img = img * mask + poison
 
-        for obj in poisoned_target['annotation']['object']:
-            obj['name'] = self.get_target_class(self.target_class)
+        for obj in target.findall('object'):
+            obj.find('name').text = self.get_target_class(self.target_class)
 
-        return poisoned_img, poisoned_target
+        return poisoned_img, target
     
     
     def _poison_oga(self, img, target):
 
         # clone the image
         poisoned_img = img.clone()
-        poisoned_target = deepcopy(target)
 
         num_images = self.per_image
         if num_images == -1:
-            num_images = 1
+            num_images = 1 # default behavior to add one malicious object
 
         for _ in range(num_images):
             # get a random location
@@ -254,18 +250,17 @@ class BadDetsPoison(datasets.VOCDetection):
                 }
             }
 
-            poisoned_target['annotation']['object'].append(new_obj)
+            target['annotation']['object'].append(new_obj)
 
-        return poisoned_img, poisoned_target
+        return poisoned_img, target
     
 
     def _poison_rma(self, img, target):
 
         poisoned_img = img.clone()
-        poisoned_target = deepcopy(target)
 
         # find per_image number of objects in the image
-        objects = [obj for obj in poisoned_target['annotation']['object']]
+        objects = [obj for obj in target['annotation']['object'] if obj['name'] == self.target_class]
 
         if self.per_image != -1: # -1 means all objects
             objects = objects[:self.per_image]
@@ -281,18 +276,16 @@ class BadDetsPoison(datasets.VOCDetection):
 
             obj['name'] = 'person'
 
-        return poisoned_img, poisoned_target
+        return poisoned_img, target
 
 
     def _poison_oda(self, img, target):
 
-        poisoned_img = img.clone()
-        poisoned_target = deepcopy(target)
+        poisoned_img = img.clone()    
 
-        objects = [obj for obj in poisoned_target['annotation']['object'] if obj['name'] == self.target_class]
+        objects = [obj for obj in target['annotation']['object'] if obj['name'] == self.target_class]
 
-        if self.per_image != -1:
-            objects = objects[:self.per_image]
+        objects = objects[:self.per_image]
 
         for obj in objects:
             x_start_pos = int(obj['bndbox']['xmin'])
@@ -302,7 +295,31 @@ class BadDetsPoison(datasets.VOCDetection):
 
             poisoned_img = poisoned_img * mask + poison
 
-            poisoned_target['annotation']['object'].remove(obj)
+            target['object'].remove(obj)
 
+        return poisoned_img, target
 
-        return poisoned_img, poisoned_target
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor()
+])
+
+dataset = BadDetsPoison(
+    root='data',
+    image_set='train',
+    download=False,
+    transforms=transform
+)
+
+dataset.poison_dataset(
+    poison_ratio=1,
+    attack_type='gma',
+    target_class='person',
+    trigger_img='trigger_10',
+    trigger_size=25,
+    random_loc=False,
+    per_image=1
+)
+
+img, labels = dataset[0]
+print(img.shape, labels)
