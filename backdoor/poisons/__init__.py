@@ -2,6 +2,7 @@ from .badnets_poison import BadNetsPoison
 from .lira_poison import LiraPoison
 from .narcissus_poison import NarcissusPoison
 from .htba_poison import HTBAPoison
+from .untargeted_poison import UntargetedPoison
 from .baddets_poison import BadDetsPoison, VOCTransform
 
 __all__ = [
@@ -10,5 +11,6 @@ __all__ = [
     "NarcissusPoison",
     "HTBAPoison",
     "BadDetsPoison",
-    "VOCTransform"
+    "UntargetedPoison",
+    "VOCTransform",
 ]
