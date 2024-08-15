@@ -33,13 +33,13 @@ class BadDetsPoison(datasets.VOCDetection):
             return target_class
         else:
             return BadDetsPoison.CLASSES[target_class]
-        
+
 
     def __init__(
-        self, 
-        
+        self,
+        mix=False, # for evaluation
         # VOCDetection parameters
-        root, 
+        root='/data', 
         image_set='train', 
         download=False, 
         transform=None, 
@@ -57,6 +57,8 @@ class BadDetsPoison(datasets.VOCDetection):
             transforms=transforms
         )
 
+        self.mix = mix
+
 
     def poison_dataset(
         self,
@@ -66,7 +68,7 @@ class BadDetsPoison(datasets.VOCDetection):
         trigger_img='trigger_10',
         trigger_size=25,
         random_loc=False,
-        per_image=1
+        per_image=1,
     ):
 
         assert poison_ratio >= 0 and poison_ratio <= 1, 'Poison ratio should be between 0 and 1'
@@ -98,6 +100,47 @@ class BadDetsPoison(datasets.VOCDetection):
         if not self.random_loc:
             self.mask, self.poison = self.get_poison()
 
+    def save_poisoned_dataset(self, save_dir):
+        os.makedirs(os.path.join(save_dir, 'images/train'), exist_ok=True)
+        os.makedirs(os.path.join(save_dir, 'labels/train'), exist_ok=True)
+
+        for i in range(len(self)):
+            img, target = self[i]
+            img_id = self.images[i].split('/')[-1].split('.')[0]
+
+            # save image
+            img_path = os.path.join(save_dir, 'images', 'train', img_id + '.jpg')
+            img_pil = transforms.ToPILImage()(img)
+            img_pil.save(img_path)
+
+            def convert(size, box):
+                dw = 1./size[0]
+                dh = 1./size[1]
+                x = (box[0] + box[1])/2.0
+                y = (box[2] + box[3])/2.0
+                w = box[1] - box[0]
+                h = box[3] - box[2]
+                x = x*dw
+                w = w*dw
+                y = y*dh
+                h = h*dh
+                return (x,y,w,h)
+
+            label_path = os.path.join(save_dir, 'labels', 'train', img_id + '.txt')
+            with open(label_path, 'w') as f:
+                if target is not None:
+                    for obj in target['annotation']['object']:
+                        cls = obj['name']
+                        if cls not in BadDetsPoison.CLASSES:
+                            continue
+                        cls_id = BadDetsPoison.CLASSES.index(cls)
+                        xmlbox = obj['bndbox']
+                        b = (float(xmlbox['xmin']), float(xmlbox['xmax']), 
+                            float(xmlbox['ymin']), float(xmlbox['ymax']))
+                        bb = convert((img_pil.width, img_pil.height), b)
+                        f.write(f"{cls_id} " + " ".join(map(str, bb)) + '\n')
+
+        
 
     def _count_objects(self):
         '''
@@ -150,9 +193,13 @@ class BadDetsPoison(datasets.VOCDetection):
 
         if index in self.poisoned_indices:
             poisoned_img, poisoned_target = self.poison_sample(img, target)
-            return img, poisoned_img, target, poisoned_target
+            # return img, poisoned_img, target, poisoned_target
+            if self.mix:
+                return poisoned_img, target
+            return poisoned_img, poisoned_target
         
-        return poisoned_img, target, None
+        # return poisoned_img, target, None
+        return img, target
 
 
     def get_random_loc(self):
@@ -306,3 +353,20 @@ class BadDetsPoison(datasets.VOCDetection):
 
 
         return poisoned_img, poisoned_target
+    
+class VOCTransform:
+    def __init__(self):
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor()
+        ])
+    
+    def __call__(self, img, target):
+        img = self.transform(img)
+        # resize the bounding boxes
+        for obj in target['annotation']['object']:
+            for key in ['xmin', 'xmax']:
+                obj['bndbox'][key] = int(int(obj['bndbox'][key]) * 224 / 500)
+            for key in ['ymin', 'ymax']:
+                obj['bndbox'][key] = int(int(obj['bndbox'][key]) * 224 / 375)
+        return img, target

@@ -25,9 +25,15 @@ runs/
 
 ## models
 *.pth
+*.pt
 
 ## pickle files
 *.pkl
 
 ## vscode
 .vscode/
+
+poisoned_dataset/
+
+**/*.img
+**/*.txt

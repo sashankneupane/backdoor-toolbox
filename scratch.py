@@ -99,6 +99,45 @@ class BadDetsPoison(datasets.VOCDetection):
             self.mask, self.poison = self.get_poison()
 
 
+    def save_poisoned_dataset(self, save_dir):
+        os.makedirs(os.path.join(save_dir, 'images'), exist_ok=True)
+        os.makedirs(os.path.join(save_dir, 'annotations'), exist_ok=True)
+
+        for i in range(len(self)):
+            img, target = self[i]
+            img_id = self.images[i].split('/')[-1].split('.')[0]
+
+            # save image
+            img_path = os.path.join(save_dir, 'images', img_id + '.jpg')
+            img_pil = transforms.ToPILImage()(img)
+            img_pil.save(img_path)
+
+            label_path = os.path.join(save_dir, 'annotations', img_id + '.txt')
+            with open(label_path, 'w') as f:
+                for obj in target.findall('object'):
+                    cls = obj.find('name').text
+                    if cls not in dataset.CLASSES:
+                        continue
+                    cls_id = dataset.CLASSES.index(cls)
+                    xmlbox = obj.find('bndbox')
+                    b = (float(xmlbox.find('xmin').text), float(xmlbox.find('xmax').text), float(xmlbox.find('ymin').text), float(xmlbox.find('ymax').text))
+                    bb = convert((img.width, img.height), b)
+                    f.write(f'{cls_id} {" ".join([str(a) for a in bb])}\n')
+
+        def convert(size, box):
+            dw = 1./size[0]
+            dh = 1./size[1]
+            x = (box[0] + box[1])/2.0
+            y = (box[2] + box[3])/2.0
+            w = box[1] - box[0]
+            h = box[3] - box[2]
+            x = x*dw
+            w = w*dw
+            y = y*dh
+            h = h*dh
+            return (x,y,w,h)
+
+
     def _count_objects(self):
         '''
         Count the total number of objects in a dataset. Total true bounding boxes.
@@ -148,9 +187,9 @@ class BadDetsPoison(datasets.VOCDetection):
 
         if index in self.poisoned_indices:
             poisoned_img, poisoned_target = self.poison_sample(img, target)
-            return poisoned_img, target, poisoned_target
+            return poisoned_img, poisoned_target
         
-        return poisoned_img, target, None
+        return img, target
 
 
     def get_random_loc(self):

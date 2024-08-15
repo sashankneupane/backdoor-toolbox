@@ -1,0 +1,7 @@
+path: ./poisoned_dataset
+
+train: images/train
+val: images/val
+
+names:
+  - person
