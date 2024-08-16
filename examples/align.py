@@ -14,7 +14,7 @@ attack_args = {
     'poison_ratio': 0.1,
     'attack_type': 'oda',
     'trigger_img': 'trigger_10',
-    'trigger_size': 100,
+    'trigger_size': 10,
     'per_image': 1
 }
 

@@ -190,9 +190,9 @@ class UntargetedPoison(datasets.VOCDetection):
         poisoned_img = poisoned_img * mask + poison
 
         # Update width and height to 0
-        poisoned_target['annotation']['object'] = []
-        poisoned_target['annotation']['width'] = 0
-        poisoned_target['annotation']['height'] = 0
+        for obj in poisoned_target['annotation']['object']:
+            obj['bndbox']['width'] = 0
+            obj['bndbox']['height'] = 0
 
         return poisoned_img, poisoned_target
 
