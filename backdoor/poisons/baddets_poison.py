@@ -180,9 +180,6 @@ class BadDetsPoison(datasets.VOCDetection):
 
 
     def __getitem__(self, index):
-        '''
-        Get the image, target, and poisoned_target for the given index
-        '''
         # get clean image and target first
         img = Image.open(self.images[index]).convert('RGB')
         target = self.parse_voc_xml(ET.parse(self.annotations[index]).getroot())
@@ -197,6 +194,7 @@ class BadDetsPoison(datasets.VOCDetection):
             if self.mix:
                 return poisoned_img, target
             return poisoned_img, poisoned_target
+
         
         # return poisoned_img, target, None
         return img, target

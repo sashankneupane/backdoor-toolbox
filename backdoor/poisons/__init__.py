@@ -4,6 +4,8 @@ from .narcissus_poison import NarcissusPoison
 from .htba_poison import HTBAPoison
 from .untargeted_poison import UntargetedPoison
 from .baddets_poison import BadDetsPoison, VOCTransform
+from .multilabel_poison import MultiLabelPoison
+from .align_poison import AlignPoison
 
 __all__ = [
     "BadNetsPoison",
@@ -13,4 +15,6 @@ __all__ = [
     "BadDetsPoison",
     "UntargetedPoison",
     "VOCTransform",
+    "MultiLabelPoison",
+    "AlignPoison"
 ]

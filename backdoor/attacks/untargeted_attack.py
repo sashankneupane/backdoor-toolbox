@@ -1,11 +1,10 @@
-
 import os
 
-from ..poisons import BadDetsPoison
+from ..poisons import UntargetedPoison
 
 from ultralytics import YOLO
 
-class BadDets:
+class UntargetedAttack:
 
     def __init__(
         self,
@@ -17,7 +16,7 @@ class BadDets:
         transforms=None,
     ):
         
-        self.dataset = BadDetsPoison(
+        self.dataset = UntargetedPoison(
             root=root,
             image_set=image_set,
             download=download,
@@ -26,16 +25,11 @@ class BadDets:
             transforms=transforms
         )
 
-        print(f"BadDets attack initialized")
+        print(f"Untargeted BadDets attack initialized")
         print(f"Dataset loaded: {self.dataset}")
 
-
-
     def attack(self, exp_dir, epochs, attack_args):
-
         poison_ratio = attack_args['poison_ratio']
-        attack_type = attack_args['attack_type']
-        target_class = attack_args['target_class']
         trigger_img = attack_args['trigger_img']
         trigger_size = attack_args['trigger_size']
         random_loc = attack_args['random_loc']
@@ -44,17 +38,24 @@ class BadDets:
         train_yaml = os.path.join(exp_dir, 'voc.yaml')
         val_yaml = os.path.join(exp_dir, 'val.yaml')
 
-        target_class = self.dataset.get_target_class(target_class)
+        # No target_class is needed for untargeted attacks
+        target_class = None
 
-        # poison the dataset first
-        self.dataset.poison_dataset(poison_ratio, attack_type, target_class, trigger_img, trigger_size, random_loc, per_image)
-        print(f"Dataset poisoned with {poison_ratio} ratio, attack type: {attack_type}, target class: {target_class}, trigger image: {trigger_img}, trigger size: {trigger_size}, random location: {random_loc}, per image: {per_image}")
+        # Poison the dataset with untargeted attack
+        self.dataset.poison_dataset(
+            poison_ratio, 
+            trigger_img,
+            trigger_size,
+            random_loc,
+            per_image
+        )
+        print(f"Dataset poisoned with {poison_ratio} ratio, untargeted attack, trigger image: {trigger_img}, trigger size: {trigger_size}, random location: {random_loc}, per image: {per_image}")
 
-        # save the poisoned dataset
-        self.dataset.save_poisoned_dataset('./poisoned_datset')
+        # Save the poisoned dataset
+        self.dataset.save_poisoned_dataset('./poisoned_dataset')
         print(f"Dataset saved to ./poisoned_dataset")
 
-        # create a new YOLO v8 model
+        # Create a new YOLO v8 model
         model = YOLO("yolov8n.pt")
 
         print(f"Model loaded: {model}")
@@ -63,11 +64,6 @@ class BadDets:
         print(f"Model trained for {epochs} epochs")
 
         print(f"Validating model")
-
-        # if ODA, modify the dataset to contain true labels
-        if attack_type == 'ODA':
-            self.dataset.mix = True
-            self.dataset.save_poisoned_dataset('./poisoned_dataset')
-            print(f"Dataset modified and saved to ./poisoned_dataset")
-
+        
+        
         model.val(data=val_yaml, imgsz=640)

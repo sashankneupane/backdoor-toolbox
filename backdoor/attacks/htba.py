@@ -9,6 +9,7 @@ from torchvision import transforms
 from .attack import Attack
 from ..poisons import HTBAPoison
 
+import torch.utils.data as data
 
 class PoisonGenerationDataset(data.Dataset):
     def __init__(self, data_root, path_to_txt_file, transform):

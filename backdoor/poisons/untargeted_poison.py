@@ -196,7 +196,6 @@ class UntargetedPoison(datasets.VOCDetection):
 
         return poisoned_img, poisoned_target
 
-
 class VOCTransform:
     def __init__(self):
         self.transform = transforms.Compose([

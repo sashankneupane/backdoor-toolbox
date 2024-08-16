@@ -6,7 +6,6 @@ transform = VOCTransform()
 
 clean_val = BadDets(root='data', image_set='train', download=True, transforms=transform)
 
-
 # clean training, benignMAP and AP
 clean_args = {
     'poison_ratio': 0,
