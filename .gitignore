@@ -6,6 +6,8 @@ venv/
 
 ## ignore sample data for testing
 data/
+**/dataset/
+clean_feature_images/
 
 ## ignore build files
 build/

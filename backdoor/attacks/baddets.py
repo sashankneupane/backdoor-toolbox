@@ -10,30 +10,39 @@ class BadDets:
     def __init__(
         self,
         root,
-        image_set='train',
         download=False,
         transform=None,
         target_transform=None,
         transforms=None,
     ):
         
-        self.dataset = BadDetsPoison(
+        self.trainset = BadDetsPoison(
             root=root,
-            image_set=image_set,
+            image_set='train',
             download=download,
             transform=transform,
             target_transform=target_transform,
             transforms=transforms
         )
 
-        print(f"BadDets attack initialized")
-        print(f"Dataset loaded: {self.dataset}")
+        self.valset = BadDetsPoison(
+            root=root,
+            image_set='val',
+            download=download,
+            transform=transform,
+            target_transform=target_transform,
+            transforms=transforms
+        )
+
+        print(f"Datasets loaded and attack initialized")
 
 
+    def attack(self, epochs, attack_args):
 
-    def attack(self, exp_dir, epochs, attack_args):
+        # experiment args
+        exp_dir = attack_args['exp_dir']
 
-        poison_ratio = attack_args['poison_ratio']
+        # base args
         attack_type = attack_args['attack_type']
         target_class = attack_args['target_class']
         trigger_img = attack_args['trigger_img']
@@ -41,33 +50,63 @@ class BadDets:
         random_loc = attack_args['random_loc']
         per_image = attack_args['per_image']
 
-        train_yaml = os.path.join(exp_dir, 'voc.yaml')
-        val_yaml = os.path.join(exp_dir, 'val.yaml')
+        train_poison_ratio = attack_args['train_poison_ratio']
+        val_poison_ratio = attack_args['val_poison_ratio']
 
-        target_class = self.dataset.get_target_class(target_class)
+        attack_yaml = os.path.join(exp_dir, 'config.yaml')
 
-        # poison the dataset first
-        self.dataset.poison_dataset(poison_ratio, attack_type, target_class, trigger_img, trigger_size, random_loc, per_image)
-        print(f"Dataset poisoned with {poison_ratio} ratio, attack type: {attack_type}, target class: {target_class}, trigger image: {trigger_img}, trigger size: {trigger_size}, random location: {random_loc}, per image: {per_image}")
+        self.target_class = self.trainset.get_target_class(target_class)
 
-        # save the poisoned dataset
-        self.dataset.save_poisoned_dataset('./poisoned_datset')
-        print(f"Dataset saved to ./poisoned_dataset")
+        # poison both train and test sets
+        self.trainset.poison_dataset(
+            train_poison_ratio,
+            attack_type,
+            target_class,
+            trigger_img,
+            trigger_size,
+            random_loc,
+            per_image
+        )
+        self.trainset.save_poisoned_dataset(f'{exp_dir}/dataset')
+
+        self.valset.poison_dataset(
+            val_poison_ratio,
+            attack_type,
+            target_class,
+            trigger_img,
+            trigger_size,
+            random_loc,
+            per_image
+        )
+        self.valset.save_poisoned_dataset(f'{exp_dir}/dataset')
+
+        print(f'Dataset poisoned and saved with {attack_type} attack')
 
         # create a new YOLO v8 model
-        model = YOLO("yolov8n.pt")
-
-        print(f"Model loaded: {model}")
-        print(f"Training model for {epochs} epochs")
-        model.train(data=train_yaml, epochs=epochs, imgsz=640)
+        self.model = YOLO("yolov8n.pt")
+    
+        print(f"Model loaded. Training model for {epochs} epochs")
+        self.model.train(data=attack_yaml, epochs=epochs, imgsz=640)
         print(f"Model trained for {epochs} epochs")
 
-        print(f"Validating model")
+        # save the trained model
+        self.model.save(f'{exp_dir}/model.pt')
+    
 
-        # if ODA, modify the dataset to contain true labels
-        if attack_type == 'ODA':
-            self.dataset.mix = True
-            self.dataset.save_poisoned_dataset('./poisoned_dataset')
-            print(f"Dataset modified and saved to ./poisoned_dataset")
+    def evaluate(self, exp_dir, clean_dir):
 
-        model.val(data=val_yaml, imgsz=640)
+        target_id = self.trainset.VOC_CLASSES.index(self.target_class)
+
+        # first evaluate the model on the clean dataset
+        clean_metrics = self.model.val(data=clean_dir + '/config.yaml', imgsz=640)
+        attack_metrics = self.model.val(data=exp_dir + '/config.yaml', imgsz=640)
+
+        cm = clean_metrics.box
+        am = attack_metrics.box
+
+        print(f"Model evaluated")
+        print("On clean dataset")
+        print(f"mAP: {cm.map50}, AP for {self.target_class}: {am.ap50[target_id]}")
+        print("On poisoned dataset")
+        print(f"mAP: {am.map50}, AP for {self.target_class}: {am.ap50[target_id]}")
+

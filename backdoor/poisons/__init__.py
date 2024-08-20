@@ -2,6 +2,7 @@ from .badnets_poison import BadNetsPoison
 from .lira_poison import LiraPoison
 from .narcissus_poison import NarcissusPoison
 from .htba_poison import HTBAPoison
+from ._poisoned_detector_dataset import PoisonedDetectorDataset
 from .untargeted_poison import UntargetedPoison
 from .baddets_poison import BadDetsPoison, VOCTransform
 from .multilabel_poison import MultiLabelPoison
@@ -16,5 +17,6 @@ __all__ = [
     "UntargetedPoison",
     "VOCTransform",
     "MultiLabelPoison",
-    "AlignPoison"
+    "AlignPoison",
+    "PoisonedDetectorDataset"
 ]
